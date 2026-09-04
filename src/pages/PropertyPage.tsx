@@ -142,6 +142,43 @@ export const PropertyPage: React.FC<PropertyPageProps> = ({ initialCode, onOpenB
             </div>
           </div>
 
+          {/* Google Maps Location & Directions */}
+          <div className="bg-white border border-[#C5A059]/20 p-6 sm:p-8 space-y-4 shadow-sm">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#C5A059]">Official Location</span>
+                <h3 className="text-xl font-serif text-[#1A1A1A] font-medium mt-1">
+                  {activeProp.name} Map & Directions
+                </h3>
+                <p className="text-xs text-[#666666] mt-0.5">{activeProp.address}</p>
+              </div>
+              <a
+                href={activeProp.code === 'sbm-guest-house' ? 'https://maps.app.goo.gl/19CoN9AhnbGm9oRWA' : 'https://maps.app.goo.gl/WTJqJpA7fL6B3fBx9'}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-[#C5A059] hover:bg-[#B48E4B] text-white text-xs font-medium px-4 py-2.5 flex items-center gap-2 transition-colors shrink-0"
+              >
+                <MapPin className="w-4 h-4" />
+                View on Google Maps ↗
+              </a>
+            </div>
+
+            <div className="w-full h-80 border border-stone-200 overflow-hidden relative bg-stone-100">
+              <iframe
+                title={`${activeProp.name} Location Map`}
+                src={activeProp.code === 'sbm-guest-house' 
+                  ? "https://maps.google.com/maps?q=Salasar+Balaji+Temple+SBM+Guest+House+Rajasthan&t=&z=15&ie=UTF8&iwloc=&output=embed"
+                  : "https://maps.google.com/maps?q=Salasar+Balaji+Temple+SBM+Hotel+Rajasthan&t=&z=15&ie=UTF8&iwloc=&output=embed"}
+                width="100%"
+                height="100%"
+                style={{ border: 0 }}
+                allowFullScreen={true}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          </div>
+
           {/* Rooms List for Property */}
           <div className="space-y-6">
             <h2 className="text-2xl font-serif text-[#1A1A1A] font-medium">

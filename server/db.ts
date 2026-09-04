@@ -961,6 +961,16 @@ class DatabaseService {
         if (!parsed.sync_jobs) {
           parsed.sync_jobs = [];
         }
+        if (Array.isArray(parsed.physical_rooms)) {
+          for (const room of parsed.physical_rooms) {
+            if (room.price === undefined) {
+              room.price = room.room_code === 'family' ? 3500 : 2500;
+            }
+            if (!room.facilities) {
+              room.facilities = ['Wi-Fi', 'Air Conditioning'];
+            }
+          }
+        }
 
         return parsed;
       }
@@ -1401,6 +1411,8 @@ class DatabaseService {
     const newRoom: PhysicalRoom = {
       ...roomData,
       room_number: roomData.room_number.trim(),
+      price: roomData.price !== undefined ? Number(roomData.price) : (roomData.room_code === 'family' ? 3500 : 2500),
+      facilities: roomData.facilities || ['Wi-Fi', 'Air Conditioning'],
       id: `rm-${roomData.property_code}-${roomData.room_number.trim()}`,
       updated_at: new Date().toISOString()
     };

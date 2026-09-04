@@ -24,7 +24,7 @@ export interface PhysicalRoom {
   check_in_date?: string;
   check_out_date?: string;
   updated_at: string;  
-  
+  price?: number;
   facilities?: string[];
   images?: string[];
   description?: string;

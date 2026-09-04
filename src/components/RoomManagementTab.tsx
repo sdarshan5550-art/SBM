@@ -233,6 +233,7 @@ export const RoomManagementTab: React.FC = () => {
         room_number: form.room_number.trim(),
         floor: form.floor,
         status: form.status,
+        price: Number(form.price !== undefined ? form.price : (form.room_code === 'family' ? 3500 : 2500)),
         facilities: form.facilities || [],
         description: form.description || '',
         max_guests: Number(form.max_guests || 2),
@@ -746,6 +747,28 @@ export const RoomManagementTab: React.FC = () => {
                     }
                     placeholder="King Bed"
                     className="w-full border border-stone-200 p-3 text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-semibold block mb-1">
+                    Room Price (₹ per night) *
+                  </label>
+
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    required
+                    value={form.price ?? (form.room_code === 'family' ? 3500 : 2500)}
+                    onChange={e =>
+                      setForm({
+                        ...form,
+                        price: Number(e.target.value)
+                      })
+                    }
+                    placeholder="2500"
+                    className="w-full border border-stone-200 p-3 text-sm font-semibold text-[#C5A059]"
                   />
                 </div>
 

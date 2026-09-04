@@ -543,6 +543,31 @@ async function startServer() {
         return res.status(400).json({ error: 'Message text is required.' });
       }
 
+      // INSTANT LIGHTNING-FAST LOCAL FAQ CACHE & LOOKUP (<10ms response)
+      const msgLower = message.toLowerCase();
+      if (!msgLower.includes('available') && !msgLower.includes('check room') && !msgLower.includes('vacancy') && !msgLower.includes('book') && !msgLower.includes('recommend') && !checkIn) {
+        let fastReply = '';
+        if (msgLower.includes('temple') || msgLower.includes('distance') || msgLower.includes('far') || msgLower.includes('location')) {
+          fastReply = 'SBM Hotel is situated on Main Temple Road, directly opposite Salasar Balaji Temple — just a 2-minute walk! SBM 2 Guest House is located nearby on Temple Approach Road, offering a peaceful environment.';
+        } else if (msgLower.includes('price') || msgLower.includes('cost') || msgLower.includes('rate') || msgLower.includes('deluxe') || msgLower.includes('family')) {
+          fastReply = 'We offer strictly two luxury room categories across our properties:\n\n• **Deluxe Room**: ₹2,500/night (+12% GST) — Max 2 adults\n• **Family Suite**: ₹3,500/night (+12% GST) — Max 4-5 adults\n\nAll rooms feature air conditioning, free Wi-Fi, 24/7 hot water, attached private bathroom, and Smart TV.';
+        } else if (msgLower.includes('contact') || msgLower.includes('phone') || msgLower.includes('number') || msgLower.includes('email')) {
+          fastReply = 'You can reach our front desk anytime:\n\n• **SBM Hotel**: +91 99835 67921 (sbmhotel@gmail.com)\n• **SBM 2 Guest House**: +91 98285 00845, +91 98286 36000 (sbmguesthouse@gmail.com)';
+        } else if (msgLower.includes('check-in') || msgLower.includes('check in') || msgLower.includes('check out') || msgLower.includes('time') || msgLower.includes('timing')) {
+          fastReply = 'Standard Check-in time is **12:00 PM** and Check-out time is **11:00 AM**. 24-hour reception is available for late arrivals and early morning darshan pilgrims.';
+        } else if (msgLower.includes('breakfast') || msgLower.includes('food') || msgLower.includes('dine') || msgLower.includes('restaurant') || msgLower.includes('prasad')) {
+          fastReply = 'We offer pure vegetarian dining, fresh breakfast options, and traditional Rajasthani thalis for devotees and families at our on-site dining hall.';
+        } else if (msgLower.includes('parking') || msgLower.includes('car') || msgLower.includes('vehicle')) {
+          fastReply = 'Free secure on-site vehicle parking is available for all guests at both SBM Hotel and SBM 2 Guest House with 24/7 security.';
+        } else if (msgLower.includes('wifi') || msgLower.includes('internet')) {
+          fastReply = 'High-speed Wi-Fi internet access is provided free of charge across all rooms and lobby areas at both properties.';
+        }
+
+        if (fastReply) {
+          return res.json({ replyText: fastReply });
+        }
+      }
+
       // Gather current DB context
       const properties = db.getProperties();
       const roomTypes = db.getRoomTypes();
@@ -566,9 +591,9 @@ async function startServer() {
       const dayAfter = new Date(today);
       dayAfter.setDate(today.getDate() + 2);
 
-      const msgLower = message.toLowerCase();
+      const msgLowerCheck = message.toLowerCase();
 
-      if (msgLower.includes('available') || msgLower.includes('check room') || msgLower.includes('vacancy') || msgLower.includes('book for') || checkIn) {
+      if (msgLowerCheck.includes('available') || msgLowerCheck.includes('check room') || msgLowerCheck.includes('vacancy') || msgLowerCheck.includes('book for') || checkIn) {
         isAvailabilityQuery = true;
         if (!searchCheckIn) searchCheckIn = tomorrow.toISOString().split('T')[0];
         if (!searchCheckOut) searchCheckOut = dayAfter.toISOString().split('T')[0];
