@@ -1,0 +1,6 @@
+{
+  "name": "SBM Hotel & Booking Management",
+  "description": "Luxury hotel booking platform and reservation management system for SBM Hotel and SBM 2 Guest House in Salasar, Rajasthan, India.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

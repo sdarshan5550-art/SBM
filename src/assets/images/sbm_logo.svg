@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80" width="320" height="80">
+  <!-- SBM Hotel Gold Tower Icon -->
+  <g transform="translate(10, 5)" stroke="#D4AF37" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- Top sign board -->
+    <rect x="22" y="4" width="26" height="12" rx="2" fill="#FAF6ED"/>
+    <text x="35" y="12" font-family="'Cinzel', 'Playfair Display', serif" font-size="6" font-weight="bold" fill="#D4AF37" text-anchor="middle" stroke="none">SBM</text>
+    
+    <!-- Tower Body -->
+    <polygon points="18,18 52,18 56,62 14,62" fill="#FAF6ED"/>
+    
+    <!-- Floor divisions -->
+    <line x1="17" y1="28" x2="53" y2="28" />
+    <line x1="16" y1="38" x2="54" y2="38" />
+    <line x1="15" y1="48" x2="55" y2="48" />
+    
+    <!-- Windows -->
+    <rect x="22" y="21" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="32" y="21" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="42" y="21" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+
+    <rect x="21" y="31" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="32" y="31" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="43" y="31" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+
+    <rect x="20" y="41" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="32" y="41" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="44" y="41" width="5" height="5" rx="0.5" fill="#D4AF37" stroke="none"/>
+
+    <rect x="19" y="51" width="5" height="6" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="32" y="51" width="5" height="6" rx="0.5" fill="#D4AF37" stroke="none"/>
+    <rect x="45" y="51" width="5" height="6" rx="0.5" fill="#D4AF37" stroke="none"/>
+
+    <!-- Entrance Canopy / Base -->
+    <polygon points="10,62 60,62 64,72 6,72" fill="#D4AF37" stroke="none"/>
+    <path d="M 6,72 L 64,72" stroke="#B8860B" stroke-width="2"/>
+  </g>
+
+  <!-- Typography: SBM HOTEL -->
+  <text x="88" y="44" font-family="'Cinzel', 'Playfair Display', 'Georgia', serif" font-size="28" font-weight="700" fill="#1A1A1A" letter-spacing="2">SBM HOTEL</text>
+  <!-- Subtitle: SALASAR BALAJI -->
+  <text x="90" y="62" font-family="'Plus Jakarta Sans', sans-serif" font-size="10" font-weight="600" fill="#C5A059" letter-spacing="3">SALASAR BALAJI • RAJASTHAN</text>
+</svg>

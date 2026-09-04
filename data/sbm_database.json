@@ -1,0 +1,346 @@
+{
+  "properties": [
+    {
+      "id": "prop-sbm-hotel",
+      "code": "sbm-hotel",
+      "name": "SBM Hotel",
+      "tagline": "Adjacent to Salasar Balaji Temple",
+      "description": "Experience unmatched spiritual serenity and hospitality in the heart of Salasar, right next to the holy temple.",
+      "address": "Main Temple Road, Opposite Salasar Balaji Temple, Salasar, Rajasthan 331506",
+      "phone": "+91 99835 67921",
+      "landline": "01568 252186",
+      "email": "sbmhotel@gmail.com",
+      "images": [
+        "/assets/images/sbm_hotel_ext_1786348685916.jpg",
+        "/assets/images/sbm_hotel_eve_1786348725936.jpg",
+        "/assets/images/sbm_entrance_facade_1786348743037.jpg"
+      ],
+      "amenities": [
+        "Temple View / 2 Min Walk",
+        "Pure Veg Restaurant",
+        "24/7 Hot & Cold Water",
+        "Air Conditioned Rooms",
+        "High Speed Wi-Fi",
+        "Elevator Access",
+        "Secure Parking",
+        "Power Backup"
+      ],
+      "status": "active"
+    },
+    {
+      "id": "prop-sbm-guesthouse",
+      "code": "sbm-guest-house",
+      "name": "SBM 2 Guest House",
+      "tagline": "Quiet Comfort near Temple Approach",
+      "description": "Peaceful accommodation with modern amenities designed for families and group pilgrims visiting Salasar.",
+      "address": "Near Temple Approach Road, Salasar, Rajasthan 331506",
+      "phone": "+91 98285 00845, +91 98286 36000",
+      "landline": "01568 294286",
+      "email": "sbmguesthouse@gmail.com",
+      "images": [
+        "/assets/images/sbm_guest_house_ext_1786348705896.jpg",
+        "/assets/images/sbm_entrance_facade_1786348743037.jpg",
+        "/assets/images/sbm_hotel_eve_1786348725936.jpg"
+      ],
+      "amenities": [
+        "Quiet Atmosphere",
+        "Air Conditioned Rooms",
+        "Spacious Family Rooms",
+        "24/7 Water Supply",
+        "Free Wi-Fi",
+        "Private Parking",
+        "Travel Assistance"
+      ],
+      "status": "active"
+    }
+  ],
+  "room_types": [
+    {
+      "id": "room-sbm-deluxe",
+      "property_id": "prop-sbm-hotel",
+      "property_code": "sbm-hotel",
+      "room_code": "deluxe",
+      "name": "Deluxe Room",
+      "description": "Comfortable premium room with modern furnishings, King size bed, and attached pristine bathroom.",
+      "capacity": 2,
+      "bed_information": "1 Double / King Bed",
+      "amenities": [
+        "Air Conditioning",
+        "Flat Screen TV",
+        "Attached Private Bathroom",
+        "Geyser for Hot Water",
+        "Free Wi-Fi",
+        "Daily Housekeeping",
+        "Tea/Coffee Maker"
+      ],
+      "price_per_night": 2500,
+      "tax_percent": 12,
+      "total_rooms": 0,
+      "images": [
+        "/assets/images/deluxe_room_main_1786347291957.jpg",
+        "/assets/images/deluxe_room_seating_1786347318111.jpg",
+        "/assets/images/deluxe_room_lounge_1786347305108.jpg"
+      ],
+      "status": "active"
+    },
+    {
+      "id": "room-sbm-family",
+      "property_id": "prop-sbm-hotel",
+      "property_code": "sbm-hotel",
+      "room_code": "family",
+      "name": "Family Suite",
+      "description": "Spacious suite ideal for families and group travelers, featuring dual beds, leather daybed lounge, and extra seating space.",
+      "capacity": 4,
+      "bed_information": "2 Double Beds / Family Beds",
+      "amenities": [
+        "Air Conditioning",
+        "Smart TV",
+        "Large Attached Bathroom",
+        "Free High Speed Wi-Fi",
+        "Seating Area",
+        "Daily Housekeeping",
+        "24/7 Room Service"
+      ],
+      "price_per_night": 3500,
+      "tax_percent": 12,
+      "total_rooms": 0,
+      "images": [
+        "/assets/images/family_suite_main_1786348221006.jpg",
+        "/assets/images/family_suite_tv_unit_1786348237828.jpg",
+        "/assets/images/deluxe_room_lounge_1786347305108.jpg"
+      ],
+      "status": "active"
+    },
+    {
+      "id": "room-gh-deluxe",
+      "property_id": "prop-sbm-guesthouse",
+      "property_code": "sbm-guest-house",
+      "room_code": "deluxe",
+      "name": "Deluxe Room",
+      "description": "Charming, clean deluxe room offering a restful sleep near Salasar Balaji temple.",
+      "capacity": 2,
+      "bed_information": "1 Double Bed",
+      "amenities": [
+        "Air Conditioning",
+        "TV",
+        "Attached Bathroom",
+        "Hot Water Geyser",
+        "Wi-Fi",
+        "Room Service"
+      ],
+      "price_per_night": 2500,
+      "tax_percent": 12,
+      "total_rooms": 0,
+      "images": [
+        "/assets/images/deluxe_room_main_1786347291957.jpg",
+        "/assets/images/deluxe_room_seating_1786347318111.jpg",
+        "/assets/images/deluxe_room_lounge_1786347305108.jpg"
+      ],
+      "status": "active"
+    },
+    {
+      "id": "room-gh-family",
+      "property_id": "prop-sbm-guesthouse",
+      "property_code": "sbm-guest-house",
+      "room_code": "family",
+      "name": "Family Suite",
+      "description": "Generous suite with multiple beds, perfectly suited for family pilgrimage trips.",
+      "capacity": 5,
+      "bed_information": "2 Large King Beds",
+      "amenities": [
+        "Air Conditioning",
+        "TV",
+        "Spacious Bathroom",
+        "Geyser",
+        "Wi-Fi",
+        "Power Backup"
+      ],
+      "price_per_night": 3500,
+      "tax_percent": 12,
+      "total_rooms": 0,
+      "images": [
+        "/assets/images/family_suite_main_1786348221006.jpg",
+        "/assets/images/family_suite_tv_unit_1786348237828.jpg",
+        "/assets/images/deluxe_room_lounge_1786347305108.jpg"
+      ],
+      "status": "active"
+    }
+  ],
+  "bookings": [],
+  "blocked_rooms": [],
+  "inquiries": [],
+  "settings": {
+    "hotel_name": "SBM Hotel",
+    "gst_percent": 12,
+    "hold_pending_inventory": true,
+    "cancellation_policy": "Full refund if cancelled 48 hours before check-in. 50% refund within 24-48 hours. No refund for same-day cancellation or no-show.",
+    "payment_gateway_mode": "test",
+    "razorpay_key_id": "rzp_test_sbmhotel2026",
+    "currency": "INR"
+  },
+  "admins": [
+    {
+      "id": "admin-1",
+      "name": "SBM Hotel Admin",
+      "email": "admin@sbmhotel.com",
+      "role": "superadmin"
+    },
+    {
+      "id": "admin-2",
+      "name": "Front Desk Receptionist",
+      "email": "frontdesk@sbmhotel.com",
+      "role": "frontdesk"
+    }
+  ],
+  "physical_rooms": [],
+  "activities": [],
+  "knowledge_base": [
+    {
+      "id": "kb-1",
+      "category": "Hotel information",
+      "title": "About SBM Hotel & SBM 2 Guest House",
+      "content": "SBM Hotel and SBM 2 Guest House are premier family lodgings in Salasar, Rajasthan, located directly adjacent to the holy Salasar Balaji Temple. We offer a 100% pure vegetarian environment, modern air-conditioned rooms, 24/7 hot/cold water, and dedicated pilgrim hospitality.",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "kb-2",
+      "category": "Property information",
+      "title": "Location & Temple Proximity",
+      "content": "SBM Hotel is situated on Main Temple Road, directly opposite Salasar Balaji Temple (a 2-minute walk). SBM 2 Guest House is situated nearby on Temple Approach Road, offering a quiet and peaceful atmosphere for families.",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "kb-3",
+      "category": "Room information",
+      "title": "Room Types & Pricing",
+      "content": "We offer strictly two official room categories: Deluxe Room at ₹2,500/night (suitable for up to 2 guests with 1 King/Double bed) and Family Suite at ₹3,500/night (suitable for 4-5 guests with 2 Double beds). All prices exclude applicable GST (12%).",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "kb-4",
+      "category": "Amenities",
+      "title": "Room and Hotel Facilities",
+      "content": "All rooms include air conditioning, flat-screen TV with satellite channels, attached private bathroom with geyser, free high-speed Wi-Fi, daily housekeeping, 24/7 power backup, pure vegetarian dining, elevator access, and secure parking.",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "kb-5",
+      "category": "Policies",
+      "title": "Check-in, Check-out & Cancellation",
+      "content": "Standard Check-in time is 12:00 PM. Standard Check-out time is 11:00 AM. Cancellation Policy: 100% refund if cancelled 48 hours before check-in. 50% refund within 24-48 hours. No refund for same-day cancellation or no-show.",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "kb-6",
+      "category": "Contact information",
+      "title": "Official Contact Numbers & Email",
+      "content": "SBM Hotel Phone: +91 99835 67921. SBM 2 Guest House Phone: +91 98285 00845, +91 98286 36000. Email: sbmhotel@gmail.com / sbmguesthouse@gmail.com. Reception operates 24/7.",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "kb-7",
+      "category": "Local information",
+      "title": "Salasar Balaji Temple Darshan Details",
+      "content": "Salasar Balaji Temple is open daily for mangla aarti and general darshan. Walking distance from SBM Hotel is under 2 minutes. Auto-rickshaws, taxi assistance, and luggage storage are available at reception.",
+      "updated_at": "2026-08-18T11:27:02.980Z"
+    }
+  ],
+  "managed_images": [
+    {
+      "id": "img-prop-cover-sbm-hotel-1",
+      "imageUrl": "/assets/images/sbm_hotel_ext_1786348685916.jpg",
+      "title": "SBM Hotel - Primary Facade & Temple Approach",
+      "description": "Main Temple Road Facade directly opposite Salasar Balaji Temple",
+      "category": "Property Cover",
+      "propertyId": "sbm-hotel",
+      "displayOrder": 1,
+      "isPrimaryCover": true,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-prop-cover-sbm-hotel-2",
+      "imageUrl": "/assets/images/sbm_hotel_eve_1786348725936.jpg",
+      "title": "SBM Hotel - Evening Twilight Lighting",
+      "description": "Warm architectural night illumination and exterior facade",
+      "category": "Property Cover",
+      "propertyId": "sbm-hotel",
+      "displayOrder": 2,
+      "isPrimaryCover": false,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-prop-cover-sbm-gh-1",
+      "imageUrl": "/assets/images/sbm_guest_house_ext_1786348705896.jpg",
+      "title": "SBM 2 Guest House - Main Entrance & Facade",
+      "description": "Peaceful facade and courtyard along Temple Approach Road",
+      "category": "Property Cover",
+      "propertyId": "sbm-guest-house",
+      "displayOrder": 1,
+      "isPrimaryCover": true,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-prop-cover-sbm-gh-2",
+      "imageUrl": "/assets/images/sbm_entrance_facade_1786348743037.jpg",
+      "title": "SBM 2 Guest House - Entrance Pathway",
+      "description": "Welcoming front entrance and peaceful pathway for devotees",
+      "category": "Property Cover",
+      "propertyId": "sbm-guest-house",
+      "displayOrder": 2,
+      "isPrimaryCover": false,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-room-deluxe-main",
+      "imageUrl": "/assets/images/deluxe_room_main_1786347291957.jpg",
+      "title": "Deluxe Room - Main Bedroom",
+      "description": "Premium king size bed with clean linen and headboard lighting",
+      "category": "Deluxe Room",
+      "roomId": "deluxe",
+      "displayOrder": 1,
+      "isPrimaryCover": true,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-room-deluxe-seating",
+      "imageUrl": "/assets/images/deluxe_room_seating_1786347318111.jpg",
+      "title": "Deluxe Room - Seating Area",
+      "description": "Modern armchair and tea table corner",
+      "category": "Deluxe Room",
+      "roomId": "deluxe",
+      "displayOrder": 2,
+      "isPrimaryCover": false,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-room-family-main",
+      "imageUrl": "/assets/images/family_suite_main_1786348221006.jpg",
+      "title": "Family Suite - Master Bedroom",
+      "description": "Spacious family layout with dual queen beds and ample circulation space",
+      "category": "Family Suite",
+      "roomId": "family",
+      "displayOrder": 1,
+      "isPrimaryCover": true,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    },
+    {
+      "id": "img-room-family-tv",
+      "imageUrl": "/assets/images/family_suite_tv_unit_1786348237828.jpg",
+      "title": "Family Suite - Entertainment Wall",
+      "description": "Flat screen television unit and spacious luggage console",
+      "category": "Family Suite",
+      "roomId": "family",
+      "displayOrder": 2,
+      "isPrimaryCover": false,
+      "createdAt": "2026-08-18T11:27:02.980Z",
+      "updatedAt": "2026-08-18T11:27:02.980Z"
+    }
+  ]
+}
