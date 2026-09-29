@@ -433,6 +433,7 @@ export const RoomManagementTab: React.FC = () => {
                   <th className="p-4">Room</th>
                   <th className="p-4">Category</th>
                   <th className="p-4">Property</th>
+                  <th className="p-4">Price / Night</th>
                   <th className="p-4">Floor</th>
                   <th className="p-4">Status</th>
                   <th className="p-4">Guest / Booking</th>
@@ -463,6 +464,12 @@ export const RoomManagementTab: React.FC = () => {
 
                     <td className="p-4">
                       {room.property_name}
+                    </td>
+
+                    <td className="p-4">
+                      <span className="font-serif font-bold text-sm text-[#C5A059]">
+                        ₹{(room.price ?? (room.room_code === 'family' ? 3500 : 2500)).toLocaleString('en-IN')}
+                      </span>
                     </td>
 
                     <td className="p-4">

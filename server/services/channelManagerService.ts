@@ -1,6 +1,7 @@
 import { db } from '../db';
 import { auditService } from './auditService';
 import { getChannelAdapter } from './channelAdapter';
+import { emailService } from './emailService';
 import {
   ChannelCode,
   ChannelConfig,
@@ -508,6 +509,11 @@ export const channelManagerService = {
           triggerReason: `OTA Cancellation - Ref ${otaRes.externalReservationId}`
         }).catch(console.error);
 
+        // Async cancellation notification
+        emailService.sendBookingCancellationEmail(cancelled, `Cancelled via ${otaRes.channel} OTA`).catch((err: any) => {
+          console.error('[EmailService] OTA cancellation notification error:', err?.message || err);
+        });
+
         return {
           success: true,
           isExisting: true,
@@ -594,6 +600,11 @@ export const channelManagerService = {
       endDate: newBooking.check_out,
       triggerReason: `New OTA Booking Import - ${newBooking.booking_number}`
     }).catch(console.error);
+
+    // Asynchronously notify admin of new OTA booking
+    emailService.sendAdminBookingNotification(newBooking).catch((err: any) => {
+      console.error('[EmailService] OTA admin alert error:', err?.message || err);
+    });
 
     return {
       success: true,

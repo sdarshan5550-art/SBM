@@ -17,6 +17,7 @@ import { pmsService } from './server/services/pmsService';
 import { auditService } from './server/services/auditService';
 import { channelService } from './server/services/channelService';
 import { channelManagerService } from './server/services/channelManagerService';
+import { emailService, logEmailStartupDiagnostics } from './server/services/emailService';
 import {
   getRazorpayServerConfig,
   logRazorpayStartupDiagnostics,
@@ -37,7 +38,37 @@ const ai = new GoogleGenAI({
     }
   }
 });
+app.get('/api/debug/database', (req, res) => {
+  try {
+    const fs = require('fs');
+    const path = require('path');
 
+    const dataDir = process.env.SBM_DATA_DIR
+      ? path.resolve(process.env.SBM_DATA_DIR)
+      : path.resolve(process.cwd(), 'data');
+
+    const dbFile = path.join(dataDir, 'sbm_database.json');
+
+    const room = db
+      .getRoomTypes('sbm-hotel')
+      .find(r => r.id === 'room-sbm-deluxe');
+
+    res.json({
+      process_cwd: process.cwd(),
+      database_directory: dataDir,
+      database_file: dbFile,
+      database_file_exists: fs.existsSync(dbFile),
+      database_file_modified: fs.existsSync(dbFile)
+        ? fs.statSync(dbFile).mtime
+        : null,
+      deluxe_room: room || null
+    });
+  } catch (error: any) {
+    res.status(500).json({
+      error: error.message
+    });
+  }
+});
 async function startServer() {
   // Initialize Database (PostgreSQL if DATABASE_URL is set, otherwise JSON fallback)
   await initializePostgres();
@@ -85,15 +116,37 @@ async function startServer() {
   });
 
   // Get Room Categories
-  app.get('/api/room-types', (req, res) => {
-    try {
-      const propertyCode = req.query.propertyCode as string;
-      const roomTypes = db.getRoomTypes(propertyCode);
-      res.json(roomTypes);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+ app.get('/api/room-types', (req, res) => {
+  try {
+    const propertyCode = req.query.propertyCode as string;
+
+    const roomTypes = db.getRoomTypes(propertyCode).map(room => ({
+      ...room,
+      price_per_night: Number(room.price_per_night)
+    }));
+
+    console.log(
+      `[PRICE API] GET /api/room-types | ` +
+      `property=${propertyCode || 'all'} | ` +
+      roomTypes
+        .map(r => `${r.id}:${r.name}=₹${r.price_per_night}`)
+        .join(', ')
+    );
+
+    // Prevent browser/proxy from serving an old price response
+    res.setHeader(
+      'Cache-Control',
+      'no-store, no-cache, must-revalidate, proxy-revalidate'
+    );
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+
+    res.json(roomTypes);
+  } catch (err: any) {
+    console.error('[PRICE API] Failed:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
   // Check Availability
   app.post('/api/availability/check', (req, res) => {
@@ -103,6 +156,13 @@ async function startServer() {
         return res.status(400).json({ error: 'Check-in and Check-out dates are required.' });
       }
       const results = db.checkAvailability(searchQuery);
+      console.log(`[Pricing Availability] PUBLIC REQUEST -> /api/availability/check for ${searchQuery.check_in} to ${searchQuery.check_out} -> Results: ${results.map(r => `${r.roomType.name}: ₹${r.pricePerNight}/n (Total: ₹${r.totalAmount})`).join(', ')}`);
+      
+      // Prevent browser/proxy from caching availability pricing
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+
       res.json(results);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -113,6 +173,17 @@ async function startServer() {
   app.post('/api/bookings', (req, res) => {
     try {
       const booking = db.createBooking(req.body);
+
+      // Asynchronously trigger customer confirmation & admin alert
+      if (booking.booking_status === 'Confirmed' || booking.payment_status === 'Completed' || booking.payment_status === 'Paid') {
+        emailService.sendBookingConfirmationEmail(booking).catch((err: any) => {
+          console.error('[EmailService] Async confirmation error:', err?.message || err);
+        });
+      }
+      emailService.sendAdminBookingNotification(booking).catch((err: any) => {
+        console.error('[EmailService] Async admin alert error:', err?.message || err);
+      });
+
       res.status(201).json(booking);
     } catch (err: any) {
       res.status(400).json({
@@ -226,7 +297,7 @@ async function startServer() {
         });
       }
 
-      // Calculate amounts strictly server-side (Deluxe: ₹2500, Family Suite: ₹3500, GST: 12%)
+      // Calculate amounts strictly server-side
       const nights = matchedResult.nights;
       const pricePerNight = matchedResult.pricePerNight;
       const roomsCount = Number(rooms);
@@ -234,6 +305,8 @@ async function startServer() {
       const taxAmount = Math.round(subtotal * 0.12);
       const totalAmount = subtotal + taxAmount;
       const amountInPaise = Math.round(totalAmount * 100);
+
+      console.log(`[Pricing Razorpay] ORDER CREATION -> Room: ${matchedResult.roomType.name} (${matchedResult.roomType.id}), DB Price: ₹${pricePerNight}/night, Nights: ${nights}, Rooms: ${roomsCount}, Subtotal: ₹${subtotal}, GST(12%): ₹${taxAmount}, Total: ₹${totalAmount}, Razorpay Amount: ${amountInPaise} paise`);
 
       // Handle Existing Booking (e.g., customer retrying failed/dismissed payment)
       let booking;
@@ -414,6 +487,14 @@ async function startServer() {
         'Razorpay Gateway'
       );
 
+      // Asynchronously trigger customer confirmation & admin alert (non-blocking)
+      emailService.sendBookingConfirmationEmail(updatedBooking).catch((err: any) => {
+        console.error('[EmailService] Async Razorpay confirmation email error:', err?.message || err);
+      });
+      emailService.sendAdminBookingNotification(updatedBooking).catch((err: any) => {
+        console.error('[EmailService] Async Razorpay admin alert error:', err?.message || err);
+      });
+
       res.json({
         success: true,
         message: 'Payment successfully verified and booking confirmed.',
@@ -482,7 +563,7 @@ async function startServer() {
         if (booking) {
           if (event === 'payment.captured' || event === 'order.paid') {
             if (booking.payment_status !== 'Completed' && booking.payment_status !== 'Paid') {
-              db.updateBooking(booking.id, {
+              const updatedBooking = db.updateBooking(booking.id, {
                 payment_status: 'Completed',
                 booking_status: 'Confirmed',
                 payment_txn_id: paymentId,
@@ -496,6 +577,14 @@ async function startServer() {
                 booking.property_code,
                 'Razorpay Webhook'
               );
+
+              // Asynchronously trigger customer confirmation & admin alert
+              emailService.sendBookingConfirmationEmail(updatedBooking).catch((err: any) => {
+                console.error('[EmailService] Webhook confirmation email error:', err?.message || err);
+              });
+              emailService.sendAdminBookingNotification(updatedBooking).catch((err: any) => {
+                console.error('[EmailService] Webhook admin alert error:', err?.message || err);
+              });
             }
           } else if (event === 'payment.failed') {
             if (booking.payment_status !== 'Completed' && booking.payment_status !== 'Paid') {
@@ -836,7 +925,21 @@ ${JSON.stringify(liveAvail, null, 2)}
 
   app.put('/api/admin/bookings/:id', authenticateAdmin, (req, res) => {
     try {
+      const existing = db.getBookingByIdOrNumber(req.params.id);
       const updated = db.updateBooking(req.params.id, req.body);
+
+      // Check if booking was cancelled
+      if (existing && existing.booking_status !== 'Cancelled' && updated.booking_status === 'Cancelled') {
+        emailService.sendBookingCancellationEmail(updated, req.body.reason || req.body.internal_notes).catch((err: any) => {
+          console.error('[EmailService] Async cancellation email error:', err?.message || err);
+        });
+      } else if (existing && existing.booking_status !== updated.booking_status && updated.booking_status === 'Confirmed') {
+        // Confirmed from Pending
+        emailService.sendBookingConfirmationEmail(updated).catch((err: any) => {
+          console.error('[EmailService] Async confirmation email error:', err?.message || err);
+        });
+      }
+
       res.json(updated);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -846,8 +949,62 @@ ${JSON.stringify(liveAvail, null, 2)}
   // Admin Manage Room Types / Pricing
   app.put('/api/admin/room-types/:id', authenticateAdmin, (req, res) => {
     try {
-      const updated = db.updateRoomType(req.params.id, req.body);
-      res.json(updated);
+     const roomId = req.params.id;
+
+const requestedPrice =
+  req.body.price !== undefined
+    ? Number(req.body.price)
+    : undefined;
+
+if (
+  requestedPrice !== undefined &&
+  (!Number.isFinite(requestedPrice) || requestedPrice < 0)
+) {
+  return res.status(400).json({
+    error: 'Invalid room price.'
+  });
+}
+
+console.log(
+  `[PRICE UPDATE] ADMIN REQUEST | room=${roomId} | newPrice=₹${requestedPrice}`
+);
+
+const updated = db.updatePhysicalRoom(roomId, {
+  ...req.body,
+  ...(requestedPrice !== undefined
+    ? { price: requestedPrice }
+    : {})
+});
+
+const roomType = db
+  .getRoomTypes()
+  .find(
+    rt =>
+      rt.id === updated.room_type_id ||
+      (
+        rt.property_code === updated.property_code &&
+        rt.room_code === updated.room_code
+      )
+  );
+
+if (!roomType) {
+  throw new Error(
+    `Price updated but parent room type could not be found.`
+  );
+}
+
+console.log(
+  `[PRICE UPDATE] SAVED | ` +
+  `physicalRoom=${updated.id} | ` +
+  `roomType=${roomType.id} | ` +
+  `price=₹${roomType.price_per_night}`
+);
+
+res.json({
+  ...updated,
+  price: Number(updated.price),
+  price_per_night: Number(roomType.price_per_night)
+});
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
@@ -955,7 +1112,11 @@ ${JSON.stringify(liveAvail, null, 2)}
 
   app.put('/api/admin/physical-rooms/:id', authenticateAdmin, (req, res) => {
     try {
-      const updated = db.updatePhysicalRoom(req.params.id, req.body);
+      const roomId = req.params.id;
+      const updated = db.updatePhysicalRoom(roomId, req.body);
+      console.log(`[Pricing Update] ADMIN REQUEST -> PhysicalRoom ID: ${roomId}, New Price: ₹${updated.price}`);
+      console.log(`[Pricing Update] DATABASE UPDATE RESULT -> Success. room_types & physical_rooms synced.`);
+      console.log(`[Pricing Update] API RESPONSE -> 200 OK with price = ₹${updated.price}`);
       res.json(updated);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
@@ -1759,6 +1920,90 @@ ${JSON.stringify(liveAvail, null, 2)}
     }
   });
 
+  // 14. Email Notification Diagnostics & Test Trigger
+  app.get('/api/admin/email/status', authenticateAdmin, (req, res) => {
+    try {
+      const cfg = emailService.getConfig();
+      res.json({
+        is_configured: cfg.isConfigured,
+        host: cfg.host ? `${cfg.host}:${cfg.port}` : null,
+        port: cfg.port,
+        from: cfg.from,
+        admin_email: cfg.adminEmail,
+        has_user: Boolean(cfg.user),
+        has_password: Boolean(cfg.password)
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/email/test', authenticateAdmin, async (req, res) => {
+    try {
+      const { targetEmail, bookingId } = req.body;
+      const admin = (req as any).admin;
+      const testRecipient = targetEmail || admin?.email || 'sbmhotel@gmail.com';
+
+      // Pick a sample booking or the specified bookingId
+      let sampleBooking = bookingId ? db.getBookingByIdOrNumber(bookingId) : null;
+      if (!sampleBooking) {
+        const all = db.getBookings();
+        sampleBooking = all[0];
+      }
+
+      if (!sampleBooking) {
+        sampleBooking = {
+          id: 'test-bk-101',
+          booking_number: 'SBM-2026-TEST',
+          property_id: 'prop-sbm-hotel',
+          property_code: 'sbm-hotel',
+          property_name: 'SBM Hotel',
+          guest_name: 'Test Devotee',
+          guest_phone: '9988776655',
+          guest_email: testRecipient,
+          room_type_id: 'room-sbm-deluxe',
+          room_name: 'Deluxe Room',
+          room_number: '101',
+          adults: 2,
+          children: 0,
+          rooms_requested: 1,
+          check_in: new Date().toISOString().split('T')[0],
+          check_out: new Date(Date.now() + 86400000).toISOString().split('T')[0],
+          nights: 1,
+          price_per_night: 2500,
+          room_subtotal: 2500,
+          tax_amount: 300,
+          total_amount: 2800,
+          paid_amount: 2800,
+          outstanding_amount: 0,
+          payment_status: 'Completed',
+          booking_status: 'Confirmed',
+          payment_method: 'online_razorpay',
+          payment_txn_id: 'pay_test_sbm2026',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      } else {
+        sampleBooking = {
+          ...sampleBooking,
+          guest_email: testRecipient
+        };
+      }
+
+      const result = await emailService.sendBookingConfirmationEmail(sampleBooking);
+      res.json({
+        success: result.success,
+        simulated: result.simulated || false,
+        messageId: result.messageId,
+        recipient: testRecipient,
+        booking_number: sampleBooking.booking_number,
+        error: result.error
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // Catch-all for undefined API routes (MUST return JSON, not Vite/HTML SPA fallback)
   app.all('/api/*', (req, res) => {
     res.status(404).json({
@@ -1788,6 +2033,7 @@ ${JSON.stringify(liveAvail, null, 2)}
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
     logRazorpayStartupDiagnostics();
+    logEmailStartupDiagnostics();
   });
 }
 

@@ -84,7 +84,19 @@ export const api = {
   // Public
   getProperties: () => request<Property[]>('/api/properties'),
   getPropertyByCode: (code: string) => request<Property>(`/api/properties/${code}`),
-  getRoomTypes: (propertyCode?: string) => request<RoomType[]>(`/api/room-types${propertyCode ? `?propertyCode=${propertyCode}` : ''}`),
+  getRoomTypes: (propertyCode?: string) => {
+  const params = new URLSearchParams();
+
+  if (propertyCode) {
+    params.set('propertyCode', propertyCode);
+  }
+
+  params.set('_t', Date.now().toString());
+
+  return request<RoomType[]>(
+    `/api/room-types?${params.toString()}`
+  );
+},
   checkAvailability: (query: AvailabilitySearchQuery) => request<RoomAvailabilityResult[]>('/api/availability/check', {
     method: 'POST',
     body: JSON.stringify(query)
@@ -602,6 +614,32 @@ export const api = {
       }),
     importOTAReservation: (data: NormalizedOTAReservation) =>
       request<{ success: boolean; isExisting: boolean; booking: any; message: string }>('/api/admin/channels/ota/import', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      })
+  },
+
+  // Email Notifications Management
+  email: {
+    getStatus: () =>
+      request<{
+        is_configured: boolean;
+        host: string | null;
+        port: number;
+        from: string;
+        admin_email: string;
+        has_user: boolean;
+        has_password: boolean;
+      }>('/api/admin/email/status'),
+    sendTestEmail: (data: { targetEmail?: string; bookingId?: string }) =>
+      request<{
+        success: boolean;
+        simulated: boolean;
+        messageId?: string;
+        recipient: string;
+        booking_number: string;
+        error?: string;
+      }>('/api/admin/email/test', {
         method: 'POST',
         body: JSON.stringify(data)
       })

@@ -2,6 +2,7 @@ import { db } from '../db';
 import { inventoryService } from './inventoryService';
 import { auditService } from './auditService';
 import { channelManagerService } from './channelManagerService';
+import { emailService } from './emailService';
 import { Booking, BookingSource, BookingStatus, PaymentStatus, PropertyCode, RoomCategoryCode } from '../../src/types';
 
 export interface CreateReservationInput {
@@ -109,6 +110,16 @@ export const reservationService = {
       endDate: createdBooking.check_out,
       triggerReason: `New Reservation: ${createdBooking.booking_number} (${createdBooking.source})`
     }).catch(console.error);
+
+    // Send Customer Confirmation and Admin Notification Emails (asynchronously, non-blocking)
+    if (createdBooking.booking_status === 'Confirmed' || createdBooking.payment_status === 'Completed' || createdBooking.payment_status === 'Paid') {
+      emailService.sendBookingConfirmationEmail(createdBooking).catch((err: any) => {
+        console.error('[EmailService] Async confirmation error:', err?.message || err);
+      });
+    }
+    emailService.sendAdminBookingNotification(createdBooking).catch((err: any) => {
+      console.error('[EmailService] Async admin alert error:', err?.message || err);
+    });
 
     return createdBooking;
   },
@@ -269,6 +280,11 @@ export const reservationService = {
       endDate: updated.check_out,
       triggerReason: `Reservation Cancelled: ${updated.booking_number}`
     }).catch(console.error);
+
+    // Send cancellation email notification (asynchronously, non-blocking)
+    emailService.sendBookingCancellationEmail(updated, reason).catch((err: any) => {
+      console.error('[EmailService] Async cancellation error:', err?.message || err);
+    });
 
     return updated;
   }

@@ -427,6 +427,87 @@ async function runDataMigrationFromJSON(client: PoolClient) {
   }
 }
 
+export async function updateRoomTypePriceInPostgres(
+  roomTypeId: string,
+  newPrice: number
+): Promise<boolean> {
+  if (!pool || !isPostgresConnected) return false;
+  try {
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        UPDATE room_types
+        SET price_per_night = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+      `, [newPrice, roomTypeId]);
+
+      // Also update default rate plan base_price for this room type
+      await client.query(`
+        UPDATE rate_plans
+        SET base_price = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE room_type_id = $2
+      `, [newPrice, roomTypeId]);
+
+      // Also update physical rooms matching this room_type_id
+      await client.query(`
+        UPDATE rooms
+        SET price = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE room_type_id = $2
+      `, [newPrice, roomTypeId]);
+
+      console.log(`✅ [PostgreSQL] Synced price_per_night = ₹${newPrice} for room_type_id: ${roomTypeId}`);
+      return true;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error('❌ [PostgreSQL] Failed to update room type price:', err.message);
+    return false;
+  }
+}
+
+export async function updatePhysicalRoomPriceInPostgres(
+  roomId: string,
+  newPrice: number
+): Promise<boolean> {
+  if (!pool || !isPostgresConnected) return false;
+  try {
+    const client = await pool.connect();
+    try {
+      const res = await client.query(`
+        UPDATE rooms
+        SET price = $1, updated_at = CURRENT_TIMESTAMP
+        WHERE id = $2
+        RETURNING room_type_id
+      `, [newPrice, roomId]);
+
+      if (res.rows.length > 0 && res.rows[0].room_type_id) {
+        const rtId = res.rows[0].room_type_id;
+        // Keep parent room_type in sync
+        await client.query(`
+          UPDATE room_types
+          SET price_per_night = $1, updated_at = CURRENT_TIMESTAMP
+          WHERE id = $2
+        `, [newPrice, rtId]);
+
+        await client.query(`
+          UPDATE rate_plans
+          SET base_price = $1, updated_at = CURRENT_TIMESTAMP
+          WHERE room_type_id = $2
+        `, [newPrice, rtId]);
+      }
+
+      console.log(`✅ [PostgreSQL] Synced price = ₹${newPrice} for physical room: ${roomId}`);
+      return true;
+    } finally {
+      client.release();
+    }
+  } catch (err: any) {
+    console.error('❌ [PostgreSQL] Failed to update physical room price:', err.message);
+    return false;
+  }
+}
+
 export async function withTransaction<T>(callback: (client: PoolClient) => Promise<T>): Promise<T> {
   if (!pool) {
     throw new Error('PostgreSQL pool not initialized');

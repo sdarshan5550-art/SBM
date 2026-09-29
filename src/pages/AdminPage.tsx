@@ -110,6 +110,20 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
   // Settings
   const [settings, setSettings] = useState<HotelSettings | null>(null);
 
+  // Email Notification Diagnostics & Test
+  const [emailStatus, setEmailStatus] = useState<{
+    is_configured: boolean;
+    host: string | null;
+    port: number;
+    from: string;
+    admin_email: string;
+    has_user: boolean;
+    has_password: boolean;
+  } | null>(null);
+  const [testEmailTarget, setTestEmailTarget] = useState('');
+  const [sendingTestEmail, setSendingTestEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
+
   // Check Token on load
   useEffect(() => {
     const token = getAdminToken();
@@ -159,6 +173,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     api.getBlockedRooms().then(setBlockedRooms).catch(console.error);
     api.getAdminInquiries().then(setInquiries).catch(console.error);
     api.getAdminSettings().then(setSettings).catch(console.error);
+    api.email.getStatus().then(setEmailStatus).catch(console.error);
   };
 
   const refreshBookings = () => {
@@ -1164,6 +1179,98 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
             >
               Save Configuration
             </button>
+          </div>
+
+          {/* Email Notification System Card */}
+          <div className="border-t border-stone-200 pt-5 mt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-serif font-bold text-stone-800 text-sm flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-[#C5A059]" />
+                  <span>Email Notification System</span>
+                </h4>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Sends automated customer booking confirmations & real-time admin booking alerts.
+                </p>
+              </div>
+              <span
+                className={`text-[10px] px-2.5 py-1 font-bold uppercase tracking-wider rounded ${
+                  emailStatus?.is_configured
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-300'
+                    : 'bg-amber-50 text-amber-700 border border-amber-300'
+                }`}
+              >
+                {emailStatus?.is_configured ? 'SMTP Configured' : 'Local Simulation / Active'}
+              </span>
+            </div>
+
+            <div className="bg-[#FDFCFB] border border-stone-200 p-3.5 space-y-2 text-xs">
+              <div className="flex justify-between items-center text-stone-600">
+                <span>SMTP Provider / Host:</span>
+                <span className="font-mono text-stone-800 font-semibold">{emailStatus?.host || 'Not set (console fallback)'}</span>
+              </div>
+              <div className="flex justify-between items-center text-stone-600">
+                <span>Sender Display ("From"):</span>
+                <span className="text-stone-800">{emailStatus?.from || '"SBM Hotel Salasar"'}</span>
+              </div>
+              <div className="flex justify-between items-center text-stone-600">
+                <span>Admin Alerts Destination:</span>
+                <span className="font-mono text-stone-800 font-semibold">{emailStatus?.admin_email || 'sbmhotel@gmail.com'}</span>
+              </div>
+            </div>
+
+            {/* Test Email Trigger */}
+            <div className="space-y-2 pt-2">
+              <label className="block text-xs font-semibold text-stone-700">
+                Send Test Confirmation Email
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  placeholder="Enter email to receive test booking voucher (e.g. your email)"
+                  value={testEmailTarget}
+                  onChange={(e) => setTestEmailTarget(e.target.value)}
+                  className="flex-1 bg-[#FDFCFB] border border-stone-200 px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                />
+                <button
+                  type="button"
+                  disabled={sendingTestEmail}
+                  onClick={async () => {
+                    setSendingTestEmail(true);
+                    setTestEmailResult(null);
+                    try {
+                      const res = await api.email.sendTestEmail({
+                        targetEmail: testEmailTarget.trim() || undefined
+                      });
+                      if (res.success) {
+                        setTestEmailResult(`✓ Test email processed for ${res.recipient} (Booking ${res.booking_number})${res.simulated ? ' [Simulated mode]' : ' [Delivered via SMTP]'}`);
+                      } else {
+                        setTestEmailResult(`❌ Failed: ${res.error || 'Unknown error'}`);
+                      }
+                    } catch (err: any) {
+                      setTestEmailResult(`❌ Error: ${err.message}`);
+                    } finally {
+                      setSendingTestEmail(false);
+                    }
+                  }}
+                  className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold px-4 py-2 text-xs uppercase tracking-wider transition disabled:opacity-50 cursor-pointer"
+                >
+                  {sendingTestEmail ? 'Sending...' : 'Send Test'}
+                </button>
+              </div>
+
+              {testEmailResult && (
+                <div
+                  className={`p-2.5 text-xs rounded border ${
+                    testEmailResult.startsWith('✓')
+                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                      : 'bg-rose-50 text-rose-800 border-rose-200'
+                  }`}
+                >
+                  {testEmailResult}
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="border-t border-stone-200 pt-5 mt-6 space-y-3">

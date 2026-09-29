@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS rooms (
     active BOOLEAN DEFAULT TRUE,
     facilities JSONB DEFAULT '[]'::jsonb,
     images JSONB DEFAULT '[]'::jsonb,
+    price NUMERIC(10, 2) DEFAULT 2500.00,
     max_guests INT DEFAULT 2,
     bed_type VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,

@@ -34,6 +34,7 @@ import {
   ChannelInventorySummary
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
+import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
 
 interface DatabaseData {
   properties: Property[];
@@ -58,8 +59,13 @@ interface DatabaseData {
   sync_jobs?: SyncJob[];
 }
 
-const DATA_DIR = path.join(process.cwd(), 'data');
+const DATA_DIR = path.resolve(__dirname, '../data');
 const DB_FILE = path.join(DATA_DIR, 'sbm_database.json');
+
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+console.log('[SBM DATABASE] Runtime database file:');
+console.log(DB_FILE);
+console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -1026,9 +1032,25 @@ class DatabaseService {
   public updateRoomType(id: string, updates: Partial<RoomType>): RoomType {
     const idx = this.data.room_types.findIndex(r => r.id === id);
     if (idx === -1) throw new Error('Room type not found');
-    this.data.room_types[idx] = { ...this.data.room_types[idx], ...updates };
+
+    const updated = { ...this.data.room_types[idx], ...updates };
+    this.data.room_types[idx] = updated;
+
+    // If price_per_night is updated, propagate to all physical rooms of this room_type
+    if (updates.price_per_night !== undefined && this.data.physical_rooms) {
+      const newPrice = Number(updates.price_per_night);
+      for (const pr of this.data.physical_rooms) {
+        if (pr.room_type_id === updated.id || (pr.property_code === updated.property_code && pr.room_code === updated.room_code)) {
+          pr.price = newPrice;
+          pr.updated_at = new Date().toISOString();
+        }
+      }
+      // Also sync to PostgreSQL if connected
+      updateRoomTypePriceInPostgres(updated.id, newPrice).catch(console.error);
+    }
+
     this.save();
-    return this.data.room_types[idx];
+    return updated;
   }
 
   // --- AVAILABILITY ENGINE ---
@@ -1394,6 +1416,67 @@ class DatabaseService {
       updated_at: new Date().toISOString()
     };
     this.data.physical_rooms[idx] = updated;
+
+    // PRICE SYNC: room_types.price_per_night is the single source of truth
+if (updates.price !== undefined) {
+  const newPrice = Number(updates.price);
+
+  if (!Number.isFinite(newPrice) || newPrice < 0) {
+    throw new Error('Invalid room price.');
+  }
+
+  // Find the parent room type
+  const parentRoomType = this.data.room_types?.find(
+    rt =>
+      rt.id === updated.room_type_id ||
+      (
+        rt.property_code === updated.property_code &&
+        rt.room_code === updated.room_code
+      )
+  );
+
+  if (!parentRoomType) {
+    throw new Error(
+      `Room type not found for physical room ${updated.id}.`
+    );
+  }
+
+  // IMPORTANT:
+  // Public website, availability and booking all read this value.
+  parentRoomType.price_per_night = newPrice;
+
+  // Update ALL physical rooms belonging to the same room category.
+  if (this.data.physical_rooms) {
+    for (const room of this.data.physical_rooms) {
+      if (
+        room.room_type_id === parentRoomType.id ||
+        (
+          room.property_code === parentRoomType.property_code &&
+          room.room_code === parentRoomType.room_code
+        )
+      ) {
+        room.price = newPrice;
+        room.updated_at = new Date().toISOString();
+      }
+    }
+  }
+
+  // PostgreSQL synchronization
+  updateRoomTypePriceInPostgres(
+    parentRoomType.id,
+    newPrice
+  ).catch(err => {
+    console.error(
+      '[PRICE SYNC] PostgreSQL synchronization failed:',
+      err
+    );
+  });
+
+  console.log(
+    `[PRICE SYNC] ${parentRoomType.name} (${parentRoomType.id}) = ₹${newPrice}`
+  );
+}
+
     this.save();
     return updated;
   }

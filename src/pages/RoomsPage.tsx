@@ -15,6 +15,11 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
     api.getRoomTypes().then(setRoomTypes).catch(console.error);
   }, []);
 
+  const deluxeRoom = roomTypes.find(r => r.room_code === 'deluxe');
+  const familyRoom = roomTypes.find(r => r.room_code === 'family');
+  const deluxePrice = deluxeRoom?.price_per_night ?? 0;
+const familyPrice = familyRoom?.price_per_night ?? 0;
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-12">
       <div className="text-center space-y-3 max-w-2xl mx-auto">
@@ -24,7 +29,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
         </h1>
         <div className="w-12 h-0.5 bg-[#C5A059] mx-auto my-3" />
         <p className="text-xs sm:text-sm text-[#666666] leading-relaxed">
-          In strict accordance with our inventory standards, we offer two primary room categories for your comfort in Salasar: <strong className="text-[#1A1A1A]">Deluxe Room</strong> (₹2,500/night) and <strong className="text-[#1A1A1A]">Family Suite</strong> (₹3,500/night).
+          In strict accordance with our inventory standards, we offer two primary room categories for your comfort in Salasar: <strong className="text-[#1A1A1A]">Deluxe Room</strong> (₹{deluxePrice.toLocaleString('en-IN')}/night) and <strong className="text-[#1A1A1A]">Family Suite</strong> (₹{familyPrice.toLocaleString('en-IN')}/night).
         </p>
       </div>
 
@@ -46,7 +51,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 text-xs text-[#666666]">
           <div className="bg-[#FDFCFB] p-5 border border-stone-100 space-y-3">
-            <div className="text-base font-serif font-bold text-[#C5A059]">Deluxe Room — ₹2,500 / night</div>
+            <div className="text-base font-serif font-bold text-[#C5A059]">Deluxe Room — ₹{deluxePrice.toLocaleString('en-IN')} / night</div>
             <p className="text-[#666666] leading-relaxed">Ideal for couples, solitary pilgrims, or business travelers seeking a comfortable and serene stay near Sri Salasar Balaji Temple.</p>
             <ul className="space-y-2 text-[#1A1A1A] pt-2">
               <li className="flex items-center gap-2">
@@ -65,7 +70,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
           </div>
 
           <div className="bg-[#FDFCFB] p-5 border border-stone-100 space-y-3">
-            <div className="text-base font-serif font-bold text-[#C5A059]">Family Suite — ₹3,500 / night</div>
+            <div className="text-base font-serif font-bold text-[#C5A059]">Family Suite — ₹{familyPrice.toLocaleString('en-IN')} / night</div>
             <p className="text-[#666666] leading-relaxed">Spacious layout designed for larger families, parents with children, or pilgrim groups traveling together to Salasar.</p>
             <ul className="space-y-2 text-[#1A1A1A] pt-2">
               <li className="flex items-center gap-2">
