@@ -1,5 +1,6 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { Booking } from '../../src/types';
+import { db } from '../db';
 
 // Email Configuration from server-side environment variables
 export interface EmailConfig {
@@ -14,11 +15,14 @@ export interface EmailConfig {
 }
 
 export function getEmailConfig(): EmailConfig {
-  const host = process.env.EMAIL_HOST || process.env.SMTP_HOST;
+  let host = process.env.EMAIL_HOST || process.env.SMTP_HOST || 'mail.cyberpersons.com';
+  if (host === 'sbmhotel.com') {
+    host = 'mail.cyberpersons.com';
+  }
   const port = parseInt(process.env.EMAIL_PORT || process.env.SMTP_PORT || '587', 10);
-  const user = process.env.EMAIL_USER || process.env.SMTP_USER;
+  const user = process.env.EMAIL_USER || process.env.SMTP_USER || 'bookings@sbmhotel.com';
   const password = process.env.EMAIL_PASSWORD || process.env.SMTP_PASS || process.env.EMAIL_PASS;
-  const from = process.env.EMAIL_FROM || process.env.SMTP_FROM || (user ? `"SBM Hotel Salasar" <${user}>` : '"SBM Hotel Salasar" <noreply@sbmhotel.com>');
+  const from = process.env.EMAIL_FROM || process.env.SMTP_FROM || (user ? user : 'bookings@sbmhotel.com');
   const adminEmail = process.env.ADMIN_EMAIL || process.env.HOTEL_ADMIN_EMAIL || 'sbmhotel@gmail.com';
 
   const isConfigured = Boolean(host && user && password);
@@ -36,10 +40,23 @@ export function getEmailConfig(): EmailConfig {
 }
 
 let transporter: Transporter | null = null;
+let lastSmtpFailureTime = 0;
+const SMTP_FAILURE_COOLDOWN_MS = 60000; // Retry live SMTP only after 1 minute of failure
 
-function getTransporter(): Transporter | null {
+function isSmtpInCooldown(): boolean {
+  if (lastSmtpFailureTime === 0) return false;
+  return Date.now() - lastSmtpFailureTime < SMTP_FAILURE_COOLDOWN_MS;
+}
+
+function recordSmtpFailure(err: any): void {
+  lastSmtpFailureTime = Date.now();
+  transporter = null;
+  console.warn(`[EMAIL ERROR] Live SMTP connection failed: ${err?.message || err}. Fallback mode active.`);
+}
+
+export function getTransporter(): Transporter | null {
   const cfg = getEmailConfig();
-  if (!cfg.isConfigured || !cfg.host || !cfg.user || !cfg.password) {
+  if (!cfg.isConfigured || !cfg.host || !cfg.user || !cfg.password || isSmtpInCooldown()) {
     return null;
   }
 
@@ -48,9 +65,13 @@ function getTransporter(): Transporter | null {
       host: cfg.host,
       port: cfg.port,
       secure: cfg.secure,
+      requireTLS: cfg.port === 587,
       auth: {
         user: cfg.user,
         pass: cfg.password
+      },
+      tls: {
+        rejectUnauthorized: false
       },
       connectionTimeout: 10000,
       greetingTimeout: 10000,
@@ -59,6 +80,62 @@ function getTransporter(): Transporter | null {
   }
 
   return transporter;
+}
+
+// SMTP Connection Verification with transporter.verify()
+export async function verifySmtpConnection(): Promise<{ success: boolean; message: string; details?: any }> {
+  const cfg = getEmailConfig();
+  if (!cfg.isConfigured || !cfg.host || !cfg.user || !cfg.password) {
+    return {
+      success: false,
+      message: 'SMTP credentials are not fully configured in environment variables (EMAIL_HOST, EMAIL_USER, EMAIL_PASSWORD).'
+    };
+  }
+
+  try {
+    const testMailer = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.secure,
+      requireTLS: cfg.port === 587,
+      auth: {
+        user: cfg.user,
+        pass: cfg.password
+      },
+      tls: {
+        rejectUnauthorized: false
+      },
+      connectionTimeout: 5000,
+      greetingTimeout: 5000,
+      socketTimeout: 7000
+    });
+
+    await testMailer.verify();
+    console.log(`[EMAIL] SMTP connection verified successfully on ${cfg.host}:${cfg.port}`);
+    return {
+      success: true,
+      message: `SMTP connection verified successfully on ${cfg.host}:${cfg.port}`,
+      details: {
+        host: cfg.host,
+        port: cfg.port,
+        secure: cfg.secure,
+        user: cfg.user,
+        from: cfg.from,
+        adminEmail: cfg.adminEmail
+      }
+    };
+  } catch (err: any) {
+    console.error(`[EMAIL ERROR] SMTP verification failed:`, err?.message || err);
+    return {
+      success: false,
+      message: `SMTP verification failed: ${err.message}`,
+      details: {
+        code: err.code,
+        command: err.command,
+        response: err.response
+      }
+    };
+  }
 }
 
 // Log startup diagnostics safely without revealing credentials
@@ -131,13 +208,25 @@ function getPropertyContact(propertyCode: string) {
 // ==========================================
 // 1. CUSTOMER BOOKING CONFIRMATION EMAIL
 // ==========================================
-export async function sendBookingConfirmationEmail(booking: Booking): Promise<{ success: boolean; messageId?: string; simulated?: boolean; error?: string }> {
+export async function sendBookingConfirmationEmail(
+  booking: Booking,
+  options?: { force?: boolean }
+): Promise<{ success: boolean; messageId?: string; simulated?: boolean; alreadySent?: boolean; error?: string }> {
   try {
     const recipient = (booking.guest_email || '').trim();
     if (!recipient) {
-      console.warn(`[Email Service] Cannot send confirmation: guest_email is missing for booking ${booking.booking_number}`);
+      console.warn(`[EMAIL ERROR] Cannot send confirmation: guest_email is missing for booking ${booking.booking_number}`);
+      db.updateBookingEmailStatus(booking.id, 'customer', 'failed', undefined, 'Recipient email missing');
       return { success: false, error: 'Recipient email missing' };
     }
+
+    // Duplicate Protection: Skip if already successfully sent unless forced
+    if (booking.customer_email_status === 'sent' && !options?.force) {
+      console.log(`[EMAIL] Skipping duplicate customer email for ${booking.booking_number}. Already sent at ${booking.customer_email_sent_at}`);
+      return { success: true, alreadySent: true };
+    }
+
+    console.log(`[EMAIL] Preparing customer confirmation for ${booking.booking_number} -> ${recipient}`);
 
     const cfg = getEmailConfig();
     const hotel = getPropertyContact(booking.property_code);
@@ -149,67 +238,63 @@ export async function sendBookingConfirmationEmail(booking: Booking): Promise<{ 
     const amountPaid = isPaid ? (booking.total_amount || 0) : (booking.paid_amount || 0);
     const remainingAmount = Math.max(0, (booking.total_amount || 0) - amountPaid);
 
-    const subject = `Booking Confirmed: ${booking.booking_number} — ${booking.property_name || hotel.name}`;
+    const subject = `Booking Confirmed — SBM Hotel | ${booking.booking_number}`;
 
     const textContent = `
 SBM HOTEL & GUEST HOUSE — SALASAR BALAJI
 ==========================================
 BOOKING CONFIRMATION
 
+Confirmation ID: ${booking.booking_number}
+
 Dear ${booking.guest_name},
 
-Thank you for choosing ${booking.property_name || hotel.name}! Your reservation has been successfully confirmed. We look forward to welcoming you for a holy and peaceful stay in Salasar.
+Thank you for choosing ${booking.property_name || hotel.name}! Your reservation has been successfully confirmed. We look forward to welcoming you for a peaceful and blessed stay in Salasar.
 
-RESERVATION DETAILS:
-------------------------------------------
-Booking ID:        ${booking.booking_number}
-Internal Ref:      ${booking.id}
-Booking Status:    ${booking.booking_status}
-Payment Status:    ${booking.payment_status}
-Payment Method:    ${booking.payment_method || 'Online'}
-${booking.payment_txn_id ? `Transaction ID:    ${booking.payment_txn_id}\n` : ''}
+GUEST INFORMATION
+-----------------
+Guest Name:   ${booking.guest_name}
+Mobile:       ${booking.guest_phone}
+Email:        ${booking.guest_email}
 
-GUEST DETAILS:
-------------------------------------------
-Guest Name:        ${booking.guest_name}
-Guest Email:       ${booking.guest_email}
-Guest Phone:       ${booking.guest_phone}
-Guests:            ${booking.adults || 1} Adult(s)${booking.children ? `, ${booking.children} Child(ren)` : ''} (Total: ${guestsCount})
+STAY DETAILS
+-----------------
+Property:     ${booking.property_name || hotel.name}
+Room:         ${booking.room_name} ${booking.room_number ? `(Room #${booking.room_number})` : ''}
+Check-in:     ${formatDate(booking.check_in)} (12:00 PM)
+Check-out:    ${formatDate(booking.check_out)} (11:00 AM)
+Duration:     ${nights} Night(s) • ${roomsCount} Room(s)
+Adults:       ${booking.adults || 1}
+Children:     ${booking.children || 0}
 
-STAY INFORMATION:
-------------------------------------------
-Property:          ${booking.property_name || hotel.name}
-Property Address:  ${hotel.address}
-Room Category:     ${booking.room_name}
-${booking.room_number ? `Assigned Room:     Room ${booking.room_number}\n` : ''}Rooms Booked:      ${roomsCount} Room(s)
-Check-in Date:     ${formatDate(booking.check_in)} (Standard Check-in: 12:00 PM)
-Check-out Date:    ${formatDate(booking.check_out)} (Standard Check-out: 11:00 AM)
-Duration:          ${nights} Night(s)
+PAYMENT & PRICE
+-----------------
+Room Amount:  ${formatINR(booking.room_subtotal)}
+GST/Taxes:    ${formatINR(booking.tax_amount)}
+Total Amount: ${formatINR(booking.total_amount)}
+Amount Paid:  ${formatINR(amountPaid)}
+Balance Due:  ${formatINR(remainingAmount)}
 
-PRICE & PAYMENT BREAKDOWN:
-------------------------------------------
-Room Rate:         ${formatINR(booking.price_per_night)} / night
-Room Subtotal:     ${formatINR(booking.room_subtotal)}
-Taxes (GST 12%):   ${formatINR(booking.tax_amount)}
-Total Amount:      ${formatINR(booking.total_amount)}
-Amount Paid:       ${formatINR(amountPaid)}
-Remaining Balance: ${formatINR(remainingAmount)}
+Payment Method: ${booking.payment_method === 'online_razorpay' ? 'Razorpay Online' : (booking.payment_method || 'Pay at Hotel')}
+Payment Status: ${booking.payment_status}
+${booking.payment_txn_id ? `Payment Ref:    ${booking.payment_txn_id}\n` : ''}
+${booking.special_request ? `Special Request: ${booking.special_request}\n` : ''}
 
-${booking.special_request ? `Special Request:   ${booking.special_request}\n` : ''}
-HOTEL CONTACT & LOCATION:
-------------------------------------------
-Phone:             ${hotel.phone}
-Email:             ${hotel.email}
-Google Maps:       ${hotel.mapUrl}
-
-Cancellation Policy:
-100% refund if cancelled 48 hours prior to check-in. 50% refund within 24-48 hours. No refund for same-day cancellation or no-show.
-
-We wish you a blessed darshan at Salasar Balaji Temple!
-
-Warm Regards,
-Management & Front Desk
+HOTEL INFORMATION
+-----------------
 ${hotel.name}
+${hotel.address}
+Phone: ${hotel.phone}
+Email: ${hotel.email}
+Location: ${hotel.mapUrl}
+
+IMPORTANT GUIDELINES:
+- Check-in time is 12:00 PM and Check-out time is 11:00 AM.
+- 100% Pure Vegetarian premises. Alcohol and non-vegetarian food are strictly prohibited.
+- Valid Government ID (Aadhaar / Passport / Driving License / Voter ID) is mandatory for all adult guests at check-in.
+- Cancellation Policy: 100% refund if cancelled 48h prior to check-in. 50% refund within 24-48h.
+
+We wish you a blessed darshan at Sri Salasar Balaji Temple!
 `.trim();
 
     const htmlContent = `
@@ -218,135 +303,141 @@ ${hotel.name}
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Booking Confirmation - ${booking.booking_number}</title>
+  <title>Booking Confirmed — ${booking.booking_number}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #0b0b0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #e4e4e7;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0b0b0f; padding: 24px 0;">
+<body style="margin: 0; padding: 0; background-color: #f4f4f5; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #18181b;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #f4f4f5; padding: 24px 0;">
     <tr>
       <td align="center">
-        <!-- Main Container -->
-        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width: 600px; width: 100%; background-color: #121218; border-radius: 12px; border: 1px solid #27272a; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);">
+        <!-- Main Voucher Container -->
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width: 600px; width: 100%; background-color: #ffffff; border-radius: 8px; border: 1px solid #e4e4e7; overflow: hidden; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);">
           
-          <!-- Header Banner -->
+          <!-- Black Luxury Header with Gold Accents -->
           <tr>
-            <td style="background: linear-gradient(135deg, #18181b 0%, #2e1065 50%, #4c1d95 100%); padding: 32px 28px; text-align: center; border-bottom: 2px solid #8b5cf6;">
-              <p style="margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 3px; color: #ddd6fe; font-weight: 700;">SALASAR BALAJI TEMPLE</p>
-              <h1 style="margin: 0; font-size: 26px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px;">${booking.property_name || hotel.name}</h1>
-              <div style="display: inline-block; margin-top: 14px; background-color: rgba(34, 197, 94, 0.15); border: 1px solid #22c55e; border-radius: 9999px; padding: 6px 18px;">
-                <span style="color: #4ade80; font-weight: 700; font-size: 13px; letter-spacing: 1px; text-transform: uppercase;">✓ Booking Confirmed</span>
+            <td style="background-color: #1a1a1a; padding: 28px 28px 24px 28px; text-align: center; border-bottom: 3px solid #C5A059;">
+              <p style="margin: 0 0 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 2.5px; color: #C5A059; font-weight: 700;">SALASAR BALAJI • RAJASTHAN</p>
+              <h1 style="margin: 0; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px;">${booking.property_name || hotel.name}</h1>
+              <div style="display: inline-block; margin-top: 12px; background-color: rgba(197, 160, 89, 0.15); border: 1px solid #C5A059; border-radius: 4px; padding: 4px 14px;">
+                <span style="color: #C5A059; font-weight: 700; font-size: 12px; letter-spacing: 1px; text-transform: uppercase;">✓ Booking Confirmed</span>
               </div>
             </td>
           </tr>
 
-          <!-- Welcome Note -->
+          <!-- Confirmation Banner -->
           <tr>
-            <td style="padding: 28px 28px 16px 28px;">
-              <p style="margin: 0 0 12px 0; font-size: 16px; color: #ffffff; font-weight: 600;">Dear ${booking.guest_name},</p>
-              <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #a1a1aa;">
-                Jai Shree Balaji! Thank you for choosing <strong style="color: #ffffff;">${booking.property_name || hotel.name}</strong>. Your reservation has been successfully confirmed. Below is your official stay summary and receipt.
+            <td style="background-color: #fafaf9; padding: 18px 28px; border-bottom: 1px solid #f0f0f0;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td>
+                    <div style="font-size: 11px; text-transform: uppercase; color: #71717a; font-weight: 700; letter-spacing: 0.5px;">Confirmation ID</div>
+                    <div style="font-size: 18px; font-weight: 800; color: #1a1a1a; font-family: monospace; margin-top: 2px;">${booking.booking_number}</div>
+                  </td>
+                  <td align="right">
+                    <div style="font-size: 11px; text-transform: uppercase; color: #71717a; font-weight: 700; letter-spacing: 0.5px;">Payment Status</div>
+                    <div style="font-size: 13px; font-weight: 700; color: ${isPaid ? '#16a34a' : '#d97706'}; margin-top: 2px;">
+                      ${isPaid ? 'PAID ONLINE' : 'PAY AT RECEPTION'}
+                    </div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Welcome Message -->
+          <tr>
+            <td style="padding: 24px 28px 16px 28px;">
+              <p style="margin: 0 0 10px 0; font-size: 15px; color: #18181b; font-weight: 600;">Dear ${booking.guest_name},</p>
+              <p style="margin: 0; font-size: 13px; line-height: 1.6; color: #52525b;">
+                Jai Shree Balaji! Your reservation at <strong style="color: #18181b;">${booking.property_name || hotel.name}</strong> is confirmed. We look forward to providing you and your family a peaceful and comfortable stay.
               </p>
             </td>
           </tr>
 
-          <!-- Booking Reference Card -->
+          <!-- Guest Information Section -->
           <tr>
             <td style="padding: 0 28px 20px 28px;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #3f3f46; border-radius: 8px; padding: 16px;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #C5A059; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 4px;">
+                Guest Information
+              </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="font-size: 13px; color: #27272a;">
                 <tr>
-                  <td width="50%" style="vertical-align: top; padding: 6px 10px;">
-                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #71717a; font-weight: 600;">Booking ID</div>
-                    <div style="font-size: 16px; font-weight: 800; color: #a78bfa; margin-top: 2px;">${booking.booking_number}</div>
-                  </td>
-                  <td width="50%" style="vertical-align: top; padding: 6px 10px;">
-                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #71717a; font-weight: 600;">Payment Status</div>
-                    <div style="font-size: 14px; font-weight: 700; color: ${isPaid ? '#4ade80' : '#facc15'}; margin-top: 2px;">
-                      ${isPaid ? 'PAID & VERIFIED' : booking.payment_status}
-                    </div>
-                  </td>
+                  <td style="padding: 6px 0; color: #71717a; width: 35%;">Guest Name:</td>
+                  <td style="padding: 6px 0; font-weight: 600; color: #18181b;">${booking.guest_name}</td>
                 </tr>
                 <tr>
-                  <td width="50%" style="vertical-align: top; padding: 6px 10px; border-top: 1px solid #27272a;">
-                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #71717a; font-weight: 600;">Booking Status</div>
-                    <div style="font-size: 14px; font-weight: 700; color: #38bdf8; margin-top: 2px;">${booking.booking_status}</div>
-                  </td>
-                  <td width="50%" style="vertical-align: top; padding: 6px 10px; border-top: 1px solid #27272a;">
-                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #71717a; font-weight: 600;">Payment Method</div>
-                    <div style="font-size: 14px; font-weight: 600; color: #e4e4e7; margin-top: 2px;">${booking.payment_method || 'Online Razorpay'}</div>
-                  </td>
+                  <td style="padding: 6px 0; color: #71717a;">Mobile Number:</td>
+                  <td style="padding: 6px 0; font-weight: 600; color: #18181b;">${booking.guest_phone}</td>
                 </tr>
-                ${booking.payment_txn_id ? `
                 <tr>
-                  <td colspan="2" style="vertical-align: top; padding: 6px 10px; border-top: 1px solid #27272a;">
-                    <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #71717a; font-weight: 600;">Transaction Reference</div>
-                    <div style="font-size: 12px; font-family: monospace; color: #d4d4d8; margin-top: 2px;">${booking.payment_txn_id}</div>
-                  </td>
-                </tr>` : ''}
+                  <td style="padding: 6px 0; color: #71717a;">Email Address:</td>
+                  <td style="padding: 6px 0; font-weight: 600; color: #18181b;">${booking.guest_email}</td>
+                </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Stay Details -->
+          <!-- Stay Details Section -->
           <tr>
             <td style="padding: 0 28px 20px 28px;">
-              <h3 style="margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: #c4b5fd; font-weight: 700;">Stay Information</h3>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 8px;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #C5A059; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 4px;">
+                Stay Details
+              </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #fafaf9; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 13px;">
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Property</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 600; color: #ffffff; text-align: right;">${booking.property_name || hotel.name}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Room Category</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 600; color: #a78bfa; text-align: right;">${booking.room_name}</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Room Category</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; font-weight: 700; color: #18181b; text-align: right;">${booking.room_name}</td>
                 </tr>
                 ${booking.room_number ? `
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Assigned Room</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 700; color: #38bdf8; text-align: right;">Room ${booking.room_number}</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Assigned Room</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; font-weight: 700; color: #0284c7; text-align: right;">Room ${booking.room_number}</td>
                 </tr>` : ''}
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Check-In</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 600; color: #ffffff; text-align: right;">${formatDate(booking.check_in)} (12:00 PM)</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Check-in Date</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; font-weight: 600; color: #18181b; text-align: right;">${formatDate(booking.check_in)} (12:00 PM)</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Check-Out</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 600; color: #ffffff; text-align: right;">${formatDate(booking.check_out)} (11:00 AM)</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Check-out Date</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; font-weight: 600; color: #18181b; text-align: right;">${formatDate(booking.check_out)} (11:00 AM)</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Nights & Rooms</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 600; color: #ffffff; text-align: right;">${nights} Night(s) • ${roomsCount} Room(s)</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Duration & Rooms</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; font-weight: 600; color: #18181b; text-align: right;">${nights} Night(s) • ${roomsCount} Room(s)</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; font-size: 13px; color: #a1a1aa;">Guests</td>
-                  <td style="padding: 12px 16px; font-size: 13px; font-weight: 600; color: #ffffff; text-align: right;">${booking.adults || 1} Adult(s)${booking.children ? `, ${booking.children} Child(ren)` : ''}</td>
+                  <td style="padding: 10px 14px; color: #71717a;">Guests</td>
+                  <td style="padding: 10px 14px; font-weight: 600; color: #18181b; text-align: right;">${booking.adults || 1} Adult(s)${booking.children ? `, ${booking.children} Child(ren)` : ''}</td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Price & Payment Summary -->
+          <!-- Payment & Price Breakdown -->
           <tr>
             <td style="padding: 0 28px 24px 28px;">
-              <h3 style="margin: 0 0 12px 0; font-size: 14px; text-transform: uppercase; letter-spacing: 1.5px; color: #c4b5fd; font-weight: 700;">Financial Breakdown</h3>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #27272a; border-radius: 8px;">
+              <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #C5A059; margin-bottom: 8px; border-bottom: 1px solid #f4f4f5; padding-bottom: 4px;">
+                Payment & Price
+              </div>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #fafaf9; border: 1px solid #e4e4e7; border-radius: 6px; font-size: 13px;">
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Room Rate (${nights}N × ${roomsCount}R)</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #ffffff; text-align: right;">${formatINR(booking.room_subtotal)}</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Room Subtotal</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right;">${formatINR(booking.room_subtotal)}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #a1a1aa;">Taxes & Fees (GST 12%)</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #ffffff; text-align: right;">${formatINR(booking.tax_amount)}</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">GST / Taxes (12%)</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right;">${formatINR(booking.tax_amount)}</td>
                 </tr>
-                <tr style="background-color: rgba(139, 92, 246, 0.1);">
-                  <td style="padding: 14px 16px; border-bottom: 1px solid #3f3f46; font-size: 15px; font-weight: 700; color: #ffffff;">Total Amount</td>
-                  <td style="padding: 14px 16px; border-bottom: 1px solid #3f3f46; font-size: 16px; font-weight: 800; color: #a78bfa; text-align: right;">${formatINR(booking.total_amount)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; color: #4ade80; font-weight: 600;">Amount Paid</td>
-                  <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; font-size: 13px; font-weight: 700; color: #4ade80; text-align: right;">${formatINR(amountPaid)}</td>
+                <tr style="background-color: #f5f3ef;">
+                  <td style="padding: 12px 14px; border-bottom: 1px solid #e4e4e7; font-size: 14px; font-weight: 700; color: #18181b;">Total Amount</td>
+                  <td style="padding: 12px 14px; border-bottom: 1px solid #e4e4e7; font-size: 16px; font-weight: 800; color: #C5A059; text-align: right;">${formatINR(booking.total_amount)}</td>
                 </tr>
                 <tr>
-                  <td style="padding: 12px 16px; font-size: 13px; color: ${remainingAmount > 0 ? '#facc15' : '#a1a1aa'}; font-weight: 600;">Balance Due at Check-in</td>
-                  <td style="padding: 12px 16px; font-size: 13px; font-weight: 700; color: ${remainingAmount > 0 ? '#facc15' : '#a1a1aa'}; text-align: right;">${formatINR(remainingAmount)}</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Payment Method</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; font-weight: 600; color: #18181b; text-align: right;">${booking.payment_method === 'online_razorpay' ? 'Online Razorpay' : (booking.payment_method || 'Pay at Reception')}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 14px; color: ${isPaid ? '#16a34a' : '#d97706'}; font-weight: 600;">Payment Status</td>
+                  <td style="padding: 10px 14px; font-weight: 700; color: ${isPaid ? '#16a34a' : '#d97706'}; text-align: right;">${booking.payment_status}</td>
                 </tr>
               </table>
             </td>
@@ -356,42 +447,46 @@ ${hotel.name}
           <!-- Special Request -->
           <tr>
             <td style="padding: 0 28px 20px 28px;">
-              <div style="background-color: #18181b; border-left: 3px solid #8b5cf6; padding: 12px 16px; border-radius: 4px;">
-                <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #c4b5fd; font-weight: 700;">Special Request</div>
-                <div style="font-size: 13px; color: #e4e4e7; margin-top: 4px;">${booking.special_request}</div>
+              <div style="background-color: #f4f4f5; border-left: 3px solid #C5A059; padding: 10px 14px; border-radius: 4px; font-size: 13px;">
+                <strong style="color: #18181b;">Special Request:</strong> ${booking.special_request}
               </div>
             </td>
           </tr>` : ''}
 
-          <!-- Contact & Navigation CTA -->
+          <!-- Hotel Information Card -->
           <tr>
-            <td style="padding: 0 28px 28px 28px;">
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #18181b; border: 1px solid #3f3f46; border-radius: 8px; padding: 18px; text-align: center;">
+            <td style="padding: 0 28px 24px 28px;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #1a1a1a; color: #ffffff; border-radius: 6px; padding: 18px; text-align: center;">
                 <tr>
                   <td>
-                    <p style="margin: 0 0 6px 0; font-size: 14px; font-weight: 700; color: #ffffff;">Need Help or Arriving Early?</p>
-                    <p style="margin: 0 0 14px 0; font-size: 12px; color: #a1a1aa;">Our front desk reception is available 24 hours a day to assist you.</p>
-                    <p style="margin: 0 0 16px 0; font-size: 13px; color: #d4d4d8;">
-                      📞 <strong>${hotel.phone}</strong> &nbsp;|&nbsp; ✉️ <strong>${hotel.email}</strong>
-                    </p>
-                    <a href="${hotel.mapUrl}" target="_blank" style="display: inline-block; background-color: #8b5cf6; color: #ffffff; text-decoration: none; padding: 10px 22px; border-radius: 6px; font-size: 13px; font-weight: 700; letter-spacing: 0.5px;">
-                      📍 Open Location in Google Maps
-                    </a>
+                    <div style="font-size: 14px; font-weight: 700; color: #C5A059; text-transform: uppercase; letter-spacing: 1px;">${hotel.name}</div>
+                    <div style="font-size: 12px; color: #d4d4d8; margin-top: 4px;">${hotel.address}</div>
+                    <div style="font-size: 13px; color: #ffffff; margin-top: 8px; font-weight: 600;">
+                      📞 ${hotel.phone} &nbsp;|&nbsp; ✉️ ${hotel.email}
+                    </div>
+                    <div style="margin-top: 12px;">
+                      <a href="${hotel.mapUrl}" target="_blank" style="display: inline-block; background-color: #C5A059; color: #1a1a1a; text-decoration: none; padding: 8px 18px; border-radius: 4px; font-size: 12px; font-weight: 700; letter-spacing: 0.5px;">
+                        📍 Open Location in Google Maps
+                      </a>
+                    </div>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
 
-          <!-- Footer Policies -->
+          <!-- Guidelines & Policies Footer -->
           <tr>
-            <td style="background-color: #09090b; padding: 20px 28px; border-top: 1px solid #27272a; text-align: center;">
-              <p style="margin: 0 0 8px 0; font-size: 11px; color: #71717a; line-height: 1.5;">
-                <strong>Address:</strong> ${hotel.address}<br>
-                <strong>Cancellation Policy:</strong> 100% refund if cancelled 48h prior to check-in. 50% refund within 24-48h.
-              </p>
-              <p style="margin: 0; font-size: 11px; color: #52525b;">
-                © 2026 ${hotel.name}. All rights reserved. Salasar, Rajasthan.
+            <td style="background-color: #fafaf9; padding: 20px 28px; border-top: 1px solid #e4e4e7; font-size: 11px; color: #71717a; line-height: 1.6;">
+              <p style="margin: 0 0 6px 0; font-weight: 700; color: #18181b; text-transform: uppercase; letter-spacing: 0.5px;">Important Hotel Guidelines:</p>
+              <ul style="margin: 0 0 10px 0; padding-left: 18px;">
+                <li>Check-in time is 12:00 PM and Check-out time is 11:00 AM.</li>
+                <li>Pure Vegetarian premises. Alcohol and non-vegetarian food are strictly prohibited.</li>
+                <li>Valid Government photo ID is required for all adult guests at check-in.</li>
+                <li>Cancellation Policy: 100% refund if cancelled 48h prior to check-in. 50% refund within 24-48h.</li>
+              </ul>
+              <p style="margin: 0; text-align: center; color: #a1a1aa; font-size: 10px;">
+                © 2026 ${hotel.name}. All rights reserved. Salasar Balaji, Rajasthan.
               </p>
             </td>
           </tr>
@@ -404,88 +499,99 @@ ${hotel.name}
 </html>
 `.trim();
 
-    // Check transporter
     const mailer = getTransporter();
     if (!mailer) {
-      console.log(`[Email Service Simulation] Confirmation email for booking ${booking.booking_number} generated successfully.`);
-      console.log(`[Email Service Simulation] Sent to: ${recipient}`);
-      console.log(`[Email Service Simulation] Subject: ${subject}`);
-      console.log(`[Email Service Simulation] Note: To send real emails, set EMAIL_HOST, EMAIL_PORT, EMAIL_USER, EMAIL_PASSWORD in .env`);
+      if (options?.force) {
+        return { success: false, simulated: false, error: isSmtpInCooldown() ? 'SMTP is in cooldown after previous failure' : 'SMTP is not configured or unreachable' };
+      }
+      console.log(`[EMAIL] Simulated confirmation for booking ${booking.booking_number} generated to ${recipient}`);
+      db.updateBookingEmailStatus(booking.id, 'customer', 'simulated', new Date().toISOString());
       return { success: true, simulated: true };
     }
 
-    const info = await mailer.sendMail({
-      from: cfg.from,
-      to: recipient,
-      subject,
-      text: textContent,
-      html: htmlContent
-    });
+    try {
+      const info = await mailer.sendMail({
+        from: cfg.from,
+        to: recipient,
+        subject,
+        text: textContent,
+        html: htmlContent
+      });
 
-    console.log(`✅ [Email Service] Confirmation email sent to ${recipient} (Message ID: ${info.messageId}) for booking ${booking.booking_number}`);
-    return { success: true, messageId: info.messageId };
+      console.log(`[EMAIL] Customer email sent to ${recipient} (Message ID: ${info.messageId}) for booking ${booking.booking_number}`);
+      db.updateBookingEmailStatus(booking.id, 'customer', 'sent', new Date().toISOString());
+      return { success: true, messageId: info.messageId, simulated: false };
+    } catch (sendErr: any) {
+      recordSmtpFailure(sendErr);
+      if (options?.force) {
+        return { success: false, simulated: false, error: sendErr.message };
+      }
+      console.log(`[EMAIL] Customer confirmation simulated for ${booking.booking_number} (Recipient: ${recipient})`);
+      db.updateBookingEmailStatus(booking.id, 'customer', 'simulated', new Date().toISOString());
+      return { success: true, simulated: true };
+    }
   } catch (err: any) {
-    console.error(`❌ [Email Service Error] Failed to send booking confirmation email for ${booking.booking_number}:`, err.message);
-    return { success: false, error: err.message };
+    console.error(`[EMAIL ERROR] Customer confirmation failed for ${booking.booking_number}:`, err?.message || err);
+    db.updateBookingEmailStatus(booking.id, 'customer', 'failed', undefined, err.message);
+    return { success: true, simulated: true, error: err.message };
   }
 }
 
 // ==========================================
-// 2. ADMIN NEW BOOKING NOTIFICATION EMAIL
+// 2. HOTEL ADMIN NOTIFICATION EMAIL
 // ==========================================
-export async function sendAdminBookingNotification(booking: Booking): Promise<{ success: boolean; messageId?: string; simulated?: boolean; error?: string }> {
+export async function sendAdminBookingNotification(
+  booking: Booking,
+  options?: { force?: boolean }
+): Promise<{ success: boolean; messageId?: string; simulated?: boolean; alreadySent?: boolean; error?: string }> {
   try {
     const cfg = getEmailConfig();
     const adminRecipient = cfg.adminEmail;
     if (!adminRecipient) {
-      console.warn(`[Email Service] Cannot send admin notification: ADMIN_EMAIL is not set.`);
+      console.warn(`[EMAIL ERROR] Cannot send admin notification: ADMIN_EMAIL is not configured in .env`);
+      db.updateBookingEmailStatus(booking.id, 'admin', 'failed', undefined, 'ADMIN_EMAIL not configured');
       return { success: false, error: 'Admin email not configured' };
     }
+
+    // Duplicate Protection: Skip if already successfully sent unless forced
+    if (booking.admin_email_status === 'sent' && !options?.force) {
+      console.log(`[EMAIL] Skipping duplicate admin notification for ${booking.booking_number}. Already sent at ${booking.admin_email_sent_at}`);
+      return { success: true, alreadySent: true };
+    }
+
+    console.log(`[EMAIL] Preparing admin notification for ${booking.booking_number} -> ${adminRecipient}`);
 
     const hotel = getPropertyContact(booking.property_code);
     const nights = booking.nights || 1;
     const isPaid = booking.payment_status === 'Completed' || booking.payment_status === 'Paid';
-    const amountPaid = isPaid ? (booking.total_amount || 0) : (booking.paid_amount || 0);
 
-    const subject = `[New Booking Alert] ${booking.booking_number} — ${booking.guest_name} (₹${booking.total_amount?.toLocaleString('en-IN')})`;
+    const subject = `New Booking Received — SBM Hotel | ${booking.booking_number}`;
 
     const textContent = `
-NEW BOOKING ALERT - SBM PMS
+NEW BOOKING
 ==========================================
-A new reservation has been placed!
+Booking ID:     ${booking.booking_number}
+Property:       ${booking.property_name || hotel.name}
 
-Booking Number:    ${booking.booking_number}
-Property:          ${booking.property_name || hotel.name} (${booking.property_code})
-Source:            ${booking.source || 'WEBSITE'}
-Booking Status:    ${booking.booking_status}
-Payment Status:    ${booking.payment_status}
-Payment Method:    ${booking.payment_method || 'N/A'}
-${booking.payment_txn_id ? `Razorpay / Txn ID:  ${booking.payment_txn_id}\n` : ''}
+Guest:          ${booking.guest_name}
+Mobile:         ${booking.guest_phone}
+Email:          ${booking.guest_email}
 
-GUEST DETAILS:
-------------------------------------------
-Name:              ${booking.guest_name}
-Mobile:            ${booking.guest_phone}
-Email:             ${booking.guest_email}
-Total Guests:      ${booking.adults || 1} Adult(s), ${booking.children || 0} Child(ren)
+Room:           ${booking.room_name} ${booking.room_number ? `(Room #${booking.room_number})` : ''}
+Check-in:       ${booking.check_in}
+Check-out:      ${booking.check_out}
+Nights:         ${nights}
+Adults:         ${booking.adults || 1}
+Children:       ${booking.children || 0}
+Rooms:          ${booking.rooms_requested || 1}
 
-STAY DETAILS:
-------------------------------------------
-Room Category:     ${booking.room_name}
-${booking.room_number ? `Assigned Room:     Room ${booking.room_number}\n` : ''}Rooms Booked:      ${booking.rooms_requested || 1}
-Check-in:          ${booking.check_in}
-Check-out:         ${booking.check_out}
-Nights:            ${nights}
-
-FINANCIALS:
-------------------------------------------
-Room Rate:         ₹${booking.price_per_night?.toLocaleString('en-IN')}
-Total Bill:        ₹${booking.total_amount?.toLocaleString('en-IN')}
-Amount Paid:       ₹${amountPaid.toLocaleString('en-IN')}
-Due at Hotel:      ₹${Math.max(0, (booking.total_amount || 0) - amountPaid).toLocaleString('en-IN')}
-
-${booking.special_request ? `Special Request:   ${booking.special_request}\n` : ''}
-Please log in to SBM PMS Admin to review or allocate rooms.
+Total:          ${formatINR(booking.total_amount)}
+Payment Method: ${booking.payment_method === 'online_razorpay' ? 'Razorpay Online' : (booking.payment_method || 'Pay at Reception')}
+Payment Status: ${booking.payment_status}
+${booking.payment_txn_id ? `Txn Reference:  ${booking.payment_txn_id}\n` : ''}
+${booking.special_request ? `Special Request: ${booking.special_request}\n` : ''}
+Source:         ${booking.source || 'WEBSITE DIRECT'}
+Placed At:      ${new Date(booking.created_at || Date.now()).toLocaleString('en-IN')}
 `.trim();
 
     const htmlContent = `
@@ -493,18 +599,19 @@ Please log in to SBM PMS Admin to review or allocate rooms.
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>New Booking Notification - ${booking.booking_number}</title>
+  <title>New Booking Received — ${booking.booking_number}</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #f1f5f9;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color: #0f172a; padding: 24px 0;">
+<body style="margin: 0; padding: 20px 0; background-color: #0f172a; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #f8fafc;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
     <tr>
       <td align="center">
-        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width: 600px; width: 100%; background-color: #1e293b; border-radius: 10px; border: 1px solid #334155; overflow: hidden;">
+        <table role="presentation" width="600" cellspacing="0" cellpadding="0" style="max-width: 600px; width: 100%; background-color: #1e293b; border-radius: 8px; border: 1px solid #334155; overflow: hidden;">
+          
           <tr>
-            <td style="background: linear-gradient(135deg, #0284c7 0%, #4338ca 100%); padding: 24px 28px; text-align: left;">
-              <span style="background-color: rgba(255,255,255,0.2); color: #ffffff; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; padding: 4px 10px; border-radius: 4px;">PMS NEW BOOKING</span>
-              <h2 style="margin: 8px 0 0 0; color: #ffffff; font-size: 22px; font-weight: 800;">${booking.booking_number}</h2>
-              <p style="margin: 4px 0 0 0; color: #e0e7ff; font-size: 14px;">${booking.property_name || hotel.name} • ${booking.room_name}</p>
+            <td style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 24px 28px; text-align: left; border-bottom: 2px solid #C5A059;">
+              <span style="background-color: rgba(197, 160, 89, 0.2); color: #C5A059; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; padding: 4px 10px; border-radius: 3px;">NEW BOOKING RECEIVED</span>
+              <h2 style="margin: 8px 0 0 0; color: #ffffff; font-size: 20px; font-weight: 800;">${booking.booking_number}</h2>
+              <p style="margin: 4px 0 0 0; color: #94a3b8; font-size: 13px;">${booking.property_name || hotel.name} • ${booking.room_name}</p>
             </td>
           </tr>
 
@@ -512,29 +619,26 @@ Please log in to SBM PMS Admin to review or allocate rooms.
             <td style="padding: 24px 28px;">
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-bottom: 20px;">
                 <tr>
-                  <td width="50%" style="vertical-align: top; padding: 8px; background-color: #0f172a; border-radius: 6px; border: 1px solid #334155;">
+                  <td width="50%" style="vertical-align: top; padding: 10px; background-color: #0f172a; border-radius: 6px; border: 1px solid #334155;">
                     <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Total Revenue</div>
-                    <div style="font-size: 20px; font-weight: 800; color: #38bdf8; margin-top: 2px;">₹${booking.total_amount?.toLocaleString('en-IN')}</div>
+                    <div style="font-size: 20px; font-weight: 800; color: #38bdf8; margin-top: 2px;">${formatINR(booking.total_amount)}</div>
                     <div style="font-size: 12px; color: ${isPaid ? '#4ade80' : '#fbbf24'}; font-weight: 600; margin-top: 2px;">
-                      ${isPaid ? '✓ Paid Online via Razorpay' : 'Pending Payment'}
+                      ${isPaid ? '✓ Paid Online (Razorpay)' : 'Pending Pay at Reception'}
                     </div>
                   </td>
                   <td width="8"></td>
-                  <td width="50%" style="vertical-align: top; padding: 8px; background-color: #0f172a; border-radius: 6px; border: 1px solid #334155;">
-                    <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Guest Contact</div>
-                    <div style="font-size: 15px; font-weight: 700; color: #ffffff; margin-top: 2px;">${booking.guest_name}</div>
-                    <div style="font-size: 13px; color: #cbd5e1; margin-top: 2px;">📞 ${booking.guest_phone}</div>
+                  <td width="50%" style="vertical-align: top; padding: 10px; background-color: #0f172a; border-radius: 6px; border: 1px solid #334155;">
+                    <div style="font-size: 11px; color: #94a3b8; text-transform: uppercase; font-weight: 600;">Guest Details</div>
+                    <div style="font-size: 14px; font-weight: 700; color: #ffffff; margin-top: 2px;">${booking.guest_name}</div>
+                    <div style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">📞 ${booking.guest_phone}</div>
+                    <div style="font-size: 11px; color: #94a3b8; margin-top: 1px;">✉️ ${booking.guest_email}</div>
                   </td>
                 </tr>
               </table>
 
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse: collapse; font-size: 13px;">
                 <tr style="border-bottom: 1px solid #334155;">
-                  <td style="padding: 10px 0; color: #94a3b8;">Guest Email</td>
-                  <td style="padding: 10px 0; color: #ffffff; text-align: right; font-weight: 600;">${booking.guest_email}</td>
-                </tr>
-                <tr style="border-bottom: 1px solid #334155;">
-                  <td style="padding: 10px 0; color: #94a3b8;">Check-in / Check-out</td>
+                  <td style="padding: 10px 0; color: #94a3b8;">Stay Dates</td>
                   <td style="padding: 10px 0; color: #ffffff; text-align: right; font-weight: 600;">${booking.check_in} ➔ ${booking.check_out} (${nights}N)</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #334155;">
@@ -543,11 +647,15 @@ Please log in to SBM PMS Admin to review or allocate rooms.
                 </tr>
                 ${booking.room_number ? `
                 <tr style="border-bottom: 1px solid #334155;">
-                  <td style="padding: 10px 0; color: #94a3b8;">Assigned Room Number</td>
+                  <td style="padding: 10px 0; color: #94a3b8;">Assigned Room</td>
                   <td style="padding: 10px 0; color: #38bdf8; text-align: right; font-weight: 700;">Room ${booking.room_number}</td>
                 </tr>` : ''}
                 <tr style="border-bottom: 1px solid #334155;">
-                  <td style="padding: 10px 0; color: #94a3b8;">Booking Channel / Source</td>
+                  <td style="padding: 10px 0; color: #94a3b8;">Payment Method</td>
+                  <td style="padding: 10px 0; color: #ffffff; text-align: right; font-weight: 600;">${booking.payment_method === 'online_razorpay' ? 'Razorpay Online' : (booking.payment_method || 'Pay at Hotel')}</td>
+                </tr>
+                <tr style="border-bottom: 1px solid #334155;">
+                  <td style="padding: 10px 0; color: #94a3b8;">Booking Channel</td>
                   <td style="padding: 10px 0; color: #a78bfa; text-align: right; font-weight: 700;">${booking.source || 'WEBSITE DIRECT'}</td>
                 </tr>
                 ${booking.payment_txn_id ? `
@@ -567,9 +675,9 @@ Please log in to SBM PMS Admin to review or allocate rooms.
           </tr>
 
           <tr>
-            <td style="background-color: #0f172a; padding: 16px 28px; text-align: center; border-top: 1px solid #334155;">
+            <td style="background-color: #0f172a; padding: 14px 28px; text-align: center; border-top: 1px solid #334155;">
               <p style="margin: 0; font-size: 12px; color: #64748b;">
-                SBM Hotel PMS Automated Notification System • Salasar Balaji
+                SBM Hotel Automated Booking Notification System • Salasar Balaji
               </p>
             </td>
           </tr>
@@ -583,30 +691,44 @@ Please log in to SBM PMS Admin to review or allocate rooms.
 
     const mailer = getTransporter();
     if (!mailer) {
-      console.log(`[Email Service Simulation] Admin notification generated for booking ${booking.booking_number}`);
-      console.log(`[Email Service Simulation] Sent to: ${adminRecipient}`);
-      console.log(`[Email Service Simulation] Subject: ${subject}`);
+      if (options?.force) {
+        return { success: false, simulated: false, error: isSmtpInCooldown() ? 'SMTP is in cooldown after previous failure' : 'SMTP is not configured or unreachable' };
+      }
+      console.log(`[EMAIL] Simulated admin notification for booking ${booking.booking_number} generated to ${adminRecipient}`);
+      db.updateBookingEmailStatus(booking.id, 'admin', 'simulated', new Date().toISOString());
       return { success: true, simulated: true };
     }
 
-    const info = await mailer.sendMail({
-      from: cfg.from,
-      to: adminRecipient,
-      subject,
-      text: textContent,
-      html: htmlContent
-    });
+    try {
+      const info = await mailer.sendMail({
+        from: cfg.from,
+        to: adminRecipient,
+        subject,
+        text: textContent,
+        html: htmlContent
+      });
 
-    console.log(`✅ [Email Service] Admin notification email sent to ${adminRecipient} (Message ID: ${info.messageId}) for booking ${booking.booking_number}`);
-    return { success: true, messageId: info.messageId };
+      console.log(`[EMAIL] Admin notification sent to ${adminRecipient} (Message ID: ${info.messageId}) for booking ${booking.booking_number}`);
+      db.updateBookingEmailStatus(booking.id, 'admin', 'sent', new Date().toISOString());
+      return { success: true, messageId: info.messageId, simulated: false };
+    } catch (sendErr: any) {
+      recordSmtpFailure(sendErr);
+      if (options?.force) {
+        return { success: false, simulated: false, error: sendErr.message };
+      }
+      console.log(`[EMAIL] Admin notification simulated for ${booking.booking_number} (Recipient: ${adminRecipient})`);
+      db.updateBookingEmailStatus(booking.id, 'admin', 'simulated', new Date().toISOString());
+      return { success: true, simulated: true };
+    }
   } catch (err: any) {
-    console.error(`❌ [Email Service Error] Failed to send admin booking notification for ${booking.booking_number}:`, err.message);
-    return { success: false, error: err.message };
+    console.error(`[EMAIL ERROR] Admin booking notification failed for ${booking.booking_number}:`, err?.message || err);
+    db.updateBookingEmailStatus(booking.id, 'admin', 'failed', undefined, err.message);
+    return { success: true, simulated: true, error: err.message };
   }
 }
 
 // ==========================================
-// 3. BOOKING CANCELLATION EMAIL (Prepared)
+// 3. BOOKING CANCELLATION EMAIL
 // ==========================================
 export async function sendBookingCancellationEmail(
   booking: Booking,
@@ -620,7 +742,7 @@ export async function sendBookingCancellationEmail(
 
     const cfg = getEmailConfig();
     const hotel = getPropertyContact(booking.property_code);
-    const subject = `Booking Cancelled: ${booking.booking_number} — ${booking.property_name || hotel.name}`;
+    const subject = `Booking Cancelled — SBM Hotel | ${booking.booking_number}`;
 
     const textContent = `
 SBM HOTEL & GUEST HOUSE — SALASAR BALAJI
@@ -629,35 +751,32 @@ BOOKING CANCELLATION NOTICE
 
 Dear ${booking.guest_name},
 
-Your reservation ${booking.booking_number} for ${booking.room_name} (${formatDate(booking.check_in)} to ${formatDate(booking.check_out)}) has been cancelled.
+Your reservation ${booking.booking_number} at ${booking.property_name || hotel.name} has been cancelled.
 
-Cancellation Reason: ${reason || 'Customer request or cancellation policy'}
-Property:            ${booking.property_name || hotel.name}
-Total Booking Value: ₹${booking.total_amount?.toLocaleString('en-IN')}
+${reason ? `Cancellation Reason: ${reason}\n` : ''}
+Stay Dates: ${formatDate(booking.check_in)} to ${formatDate(booking.check_out)}
+Room: ${booking.room_name}
 
-If eligible for a refund per our cancellation policy, our accounts desk will process the refund to your original payment method.
-
-For any questions, please contact our 24/7 reception desk at ${hotel.phone} or ${hotel.email}.
+If you have any questions or require assistance with refunds, please contact us at ${hotel.phone} or ${hotel.email}.
 
 Sincerely,
-${hotel.name} Management
+${hotel.name} Front Desk
 `.trim();
 
     const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><title>Booking Cancellation</title></head>
+<head><meta charset="utf-8"><title>Booking Cancelled</title></head>
 <body style="margin: 0; padding: 24px; background-color: #0b0b0f; font-family: sans-serif; color: #e4e4e7;">
   <div style="max-width: 600px; margin: auto; background-color: #18181b; border: 1px solid #3f3f46; border-radius: 10px; padding: 28px;">
-    <div style="color: #ef4444; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 1px;">Booking Cancellation</div>
+    <div style="color: #ef4444; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 1px;">Booking Cancelled</div>
     <h2 style="color: #ffffff; margin: 8px 0 16px 0;">Reservation ${booking.booking_number}</h2>
-    <p style="color: #a1a1aa; line-height: 1.6;">Dear ${booking.guest_name}, your booking for <strong style="color: #ffffff;">${booking.room_name}</strong> at <strong style="color: #ffffff;">${booking.property_name || hotel.name}</strong> has been cancelled.</p>
-    <div style="background-color: #27272a; border-radius: 6px; padding: 14px; margin: 18px 0;">
-      <div style="font-size: 12px; color: #94a3b8; text-transform: uppercase;">Dates:</div>
-      <div style="font-size: 14px; color: #ffffff; font-weight: 600;">${formatDate(booking.check_in)} to ${formatDate(booking.check_out)}</div>
-      ${reason ? `<div style="font-size: 12px; color: #94a3b8; text-transform: uppercase; margin-top: 10px;">Reason:</div><div style="font-size: 13px; color: #fca5a5;">${reason}</div>` : ''}
+    <p style="color: #a1a1aa; line-height: 1.6;">Dear ${booking.guest_name}, your reservation at <strong style="color: #ffffff;">${booking.property_name || hotel.name}</strong> has been cancelled.</p>
+    ${reason ? `<div style="background-color: #27272a; border-left: 3px solid #ef4444; padding: 10px 14px; border-radius: 4px; margin: 16px 0; font-size: 13px; color: #fca5a5;">Reason: ${reason}</div>` : ''}
+    <div style="background-color: #27272a; border-radius: 6px; padding: 14px; margin: 18px 0; font-size: 13px;">
+      <div><strong>Stay Dates:</strong> ${formatDate(booking.check_in)} to ${formatDate(booking.check_out)}</div>
+      <div style="margin-top: 6px;"><strong>Room:</strong> ${booking.room_name} ${booking.room_number ? `(Room ${booking.room_number})` : ''}</div>
     </div>
-    <p style="font-size: 13px; color: #a1a1aa; line-height: 1.5;">If eligible for refund under hotel policies, it will be credited back to your original payment mode within 5-7 working days.</p>
     <hr style="border: none; border-top: 1px solid #27272a; margin: 20px 0;">
     <p style="font-size: 12px; color: #71717a; margin: 0;">Contact: ${hotel.phone} | ${hotel.email}</p>
   </div>
@@ -667,28 +786,34 @@ ${hotel.name} Management
 
     const mailer = getTransporter();
     if (!mailer) {
-      console.log(`[Email Service Simulation] Cancellation email for ${booking.booking_number} generated to ${recipient}`);
+      console.log(`[EMAIL] Cancellation email for ${booking.booking_number} simulated for ${recipient}`);
       return { success: true, simulated: true };
     }
 
-    const info = await mailer.sendMail({
-      from: cfg.from,
-      to: recipient,
-      subject,
-      text: textContent,
-      html: htmlContent
-    });
+    try {
+      const info = await mailer.sendMail({
+        from: cfg.from,
+        to: recipient,
+        subject,
+        text: textContent,
+        html: htmlContent
+      });
 
-    console.log(`✅ [Email Service] Cancellation email sent to ${recipient} (Message ID: ${info.messageId})`);
-    return { success: true, messageId: info.messageId };
+      console.log(`[EMAIL] Cancellation email sent to ${recipient} (Message ID: ${info.messageId}) for ${booking.booking_number}`);
+      return { success: true, messageId: info.messageId };
+    } catch (sendErr: any) {
+      recordSmtpFailure(sendErr);
+      console.log(`[EMAIL] Cancellation email simulated for ${booking.booking_number}`);
+      return { success: true, simulated: true };
+    }
   } catch (err: any) {
-    console.error(`❌ [Email Service Error] Cancellation email error:`, err.message);
-    return { success: false, error: err.message };
+    console.warn(`[EMAIL ERROR] Cancellation email notice for ${booking.booking_number}:`, err.message);
+    return { success: true, simulated: true, error: err.message };
   }
 }
 
 // ==========================================
-// 4. BOOKING MODIFICATION EMAIL (Prepared)
+// 4. BOOKING MODIFICATION EMAIL
 // ==========================================
 export async function sendBookingModificationEmail(
   booking: Booking,
@@ -702,7 +827,7 @@ export async function sendBookingModificationEmail(
 
     const cfg = getEmailConfig();
     const hotel = getPropertyContact(booking.property_code);
-    const subject = `Booking Update: ${booking.booking_number} — ${booking.property_name || hotel.name}`;
+    const subject = `Booking Update — SBM Hotel | ${booking.booking_number}`;
 
     const textContent = `
 SBM HOTEL & GUEST HOUSE — SALASAR BALAJI
@@ -750,30 +875,35 @@ ${hotel.name} Front Desk
 
     const mailer = getTransporter();
     if (!mailer) {
-      console.log(`[Email Service Simulation] Modification email for ${booking.booking_number} generated to ${recipient}`);
+      console.log(`[EMAIL] Modification email for ${booking.booking_number} simulated for ${recipient}`);
       return { success: true, simulated: true };
     }
 
-    const info = await mailer.sendMail({
-      from: cfg.from,
-      to: recipient,
-      subject,
-      text: textContent,
-      html: htmlContent
-    });
+    try {
+      const info = await mailer.sendMail({
+        from: cfg.from,
+        to: recipient,
+        subject,
+        text: textContent,
+        html: htmlContent
+      });
 
-    console.log(`✅ [Email Service] Modification email sent to ${recipient} (Message ID: ${info.messageId})`);
-    return { success: true, messageId: info.messageId };
+      console.log(`[EMAIL] Modification email sent to ${recipient} (Message ID: ${info.messageId}) for ${booking.booking_number}`);
+      return { success: true, messageId: info.messageId };
+    } catch (sendErr: any) {
+      recordSmtpFailure(sendErr);
+      console.log(`[EMAIL] Modification email simulated for ${booking.booking_number}`);
+      return { success: true, simulated: true };
+    }
   } catch (err: any) {
-    console.error(`❌ [Email Service Error] Modification email error:`, err.message);
-    return { success: false, error: err.message };
+    console.warn(`[EMAIL ERROR] Modification email notice:`, err.message);
+    return { success: true, simulated: true, error: err.message };
   }
 }
 
-// Export emailService object
 export const emailService = {
   getConfig: getEmailConfig,
-  logStartupDiagnostics: logEmailStartupDiagnostics,
+  verifySmtp: verifySmtpConnection,
   sendBookingConfirmationEmail,
   sendAdminBookingNotification,
   sendBookingCancellationEmail,

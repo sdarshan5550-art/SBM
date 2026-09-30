@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import bcrypt from 'bcryptjs';
 import {
   Property,
@@ -31,7 +32,8 @@ import {
   SyncJob,
   SyncJobStatus,
   SyncOperation,
-  ChannelInventorySummary
+  ChannelInventorySummary,
+  AboutPageImage
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
 import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
@@ -49,6 +51,7 @@ interface DatabaseData {
   activities: FrontDeskActivity[];
   knowledge_base: KnowledgeItem[];
   managed_images?: ManagedImage[];
+  about_page_images?: AboutPageImage[];
   guests?: Guest[];
   payments?: PaymentRecord[];
   inventory_holds?: any[];
@@ -59,7 +62,12 @@ interface DatabaseData {
   sync_jobs?: SyncJob[];
 }
 
-const DATA_DIR = path.resolve(__dirname, '../data');
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const DATA_DIR = process.env.SBM_DATA_DIR
+  ? path.resolve(process.env.SBM_DATA_DIR)
+  : path.resolve(__dirname, '../data');
 const DB_FILE = path.join(DATA_DIR, 'sbm_database.json');
 
 console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -1271,6 +1279,42 @@ class DatabaseService {
 
     const updated = {
       ...this.data.bookings[idx],
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+
+    this.data.bookings[idx] = updated;
+    this.save();
+    return updated;
+  }
+
+  public updateBookingEmailStatus(
+    bookingId: string,
+    type: 'customer' | 'admin',
+    status: 'sent' | 'failed' | 'simulated',
+    sentAt?: string,
+    error?: string
+  ): Booking | undefined {
+    const idx = this.data.bookings.findIndex(b => b.id === bookingId || b.booking_number === bookingId);
+    if (idx === -1) return undefined;
+
+    const now = sentAt || new Date().toISOString();
+    const current = this.data.bookings[idx];
+
+    const updates: Partial<Booking> = type === 'customer'
+      ? {
+          customer_email_status: status,
+          customer_email_sent_at: status === 'sent' || status === 'simulated' ? now : current.customer_email_sent_at,
+          customer_email_error: error || undefined
+        }
+      : {
+          admin_email_status: status,
+          admin_email_sent_at: status === 'sent' || status === 'simulated' ? now : current.admin_email_sent_at,
+          admin_email_error: error || undefined
+        };
+
+    const updated = {
+      ...current,
       ...updates,
       updated_at: new Date().toISOString()
     };
@@ -3065,6 +3109,79 @@ if (updates.price !== undefined) {
         }
       }
     }
+  }
+
+  // ==========================================
+  // --- DEDICATED ABOUT PAGE IMAGES MANAGEMENT ---
+  // ==========================================
+  public getAboutPageImages(): AboutPageImage[] {
+    if (!this.data.about_page_images) {
+      this.data.about_page_images = [];
+    }
+    return this.data.about_page_images;
+  }
+
+  public getAboutPageImage(propertyId: string): AboutPageImage | undefined {
+    if (!this.data.about_page_images) return undefined;
+    return this.data.about_page_images.find(
+      img => img.property_id === propertyId || img.property_id === (propertyId === 'sbm-hotel' ? 'prop-sbm-hotel' : 'prop-sbm-guesthouse')
+    );
+  }
+
+  public saveAboutPageImage(propertyId: string, imageUrl: string, title?: string, caption?: string): AboutPageImage {
+    if (!this.data.about_page_images) {
+      this.data.about_page_images = [];
+    }
+
+    const normPropId = propertyId === 'prop-sbm-hotel' ? 'sbm-hotel' : propertyId === 'prop-sbm-guesthouse' ? 'sbm-guest-house' : propertyId;
+    const now = new Date().toISOString();
+
+    const existingIndex = this.data.about_page_images.findIndex(
+      img => img.property_id === normPropId || img.property_id === propertyId
+    );
+
+    if (existingIndex >= 0) {
+      // UPDATE existing record to avoid duplicates
+      const updated: AboutPageImage = {
+        ...this.data.about_page_images[existingIndex],
+        property_id: normPropId,
+        image_url: imageUrl,
+        title: title || (normPropId === 'sbm-hotel' ? 'SBM Hotel' : 'SBM 2 Guest House'),
+        caption: caption || (normPropId === 'sbm-hotel' ? 'Main Temple Road, Salasar' : 'Temple Approach Road, Salasar'),
+        updated_at: now
+      };
+      this.data.about_page_images[existingIndex] = updated;
+      this.save();
+      return updated;
+    } else {
+      // INSERT new record
+      const created: AboutPageImage = {
+        id: `about-img-${normPropId}-${Date.now()}`,
+        property_id: normPropId,
+        image_url: imageUrl,
+        title: title || (normPropId === 'sbm-hotel' ? 'SBM Hotel' : 'SBM 2 Guest House'),
+        caption: caption || (normPropId === 'sbm-hotel' ? 'Main Temple Road, Salasar' : 'Temple Approach Road, Salasar'),
+        created_at: now,
+        updated_at: now
+      };
+      this.data.about_page_images.push(created);
+      this.save();
+      return created;
+    }
+  }
+
+  public deleteAboutPageImage(propertyId: string): boolean {
+    if (!this.data.about_page_images) return false;
+    const normPropId = propertyId === 'prop-sbm-hotel' ? 'sbm-hotel' : propertyId === 'prop-sbm-guesthouse' ? 'sbm-guest-house' : propertyId;
+    const initialLen = this.data.about_page_images.length;
+    this.data.about_page_images = this.data.about_page_images.filter(
+      img => img.property_id !== normPropId && img.property_id !== propertyId && img.id !== propertyId
+    );
+    if (this.data.about_page_images.length !== initialLen) {
+      this.save();
+      return true;
+    }
+    return false;
   }
 }
 

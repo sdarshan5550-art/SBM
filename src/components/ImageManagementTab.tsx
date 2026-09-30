@@ -24,8 +24,9 @@ import {
   Building2
 } from 'lucide-react';
 import { api, getAdminToken } from '../lib/api';
-import { ManagedImage, GalleryCategory } from '../types';
+import { ManagedImage, GalleryCategory, AboutPageImage } from '../types';
 import { ManagedImageDisplay } from './ManagedImageDisplay';
+import { DEFAULT_PHOTOS } from '../data/mockPhotos';
 
 const GALLERY_CATEGORIES: GalleryCategory[] = [
   'Hotel Exterior',
@@ -42,14 +43,22 @@ const GALLERY_CATEGORIES: GalleryCategory[] = [
 
 export const ImageManagementTab: React.FC = () => {
   const [images, setImages] = useState<ManagedImage[]>([]);
+  const [aboutImages, setAboutImages] = useState<AboutPageImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Active navigation view inside Image Management: Rooms, Gallery, or Property Cover Images
-  const [mainView, setMainView] = useState<'rooms' | 'gallery' | 'property-covers'>('rooms');
+  // Active navigation view inside Image Management: Rooms, Gallery, Property Cover Images, or About Page
+  const [mainView, setMainView] = useState<'rooms' | 'gallery' | 'property-covers' | 'about-page'>('rooms');
   const [selectedRoomForGallery, setSelectedRoomForGallery] = useState<'deluxe' | 'family' | null>(null);
   const [galleryCategoryFilter, setGalleryCategoryFilter] = useState<string>('all');
+
+  // Dedicated About Page Image Modal
+  const [aboutModalProperty, setAboutModalProperty] = useState<'sbm-hotel' | 'sbm-guest-house' | null>(null);
+  const [aboutFile, setAboutFile] = useState<{ name: string; size: number; base64: string } | null>(null);
+  const [aboutUrlInput, setAboutUrlInput] = useState('');
+  const [aboutIsSubmitting, setAboutIsSubmitting] = useState(false);
+  const aboutFileInputRef = useRef<HTMLInputElement>(null);
 
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -95,8 +104,12 @@ export const ImageManagementTab: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.getAdminImages(token);
-      setImages(Array.isArray(data) ? data : []);
+      const [imagesData, aboutData] = await Promise.all([
+        api.getAdminImages(token),
+        api.getAdminAboutImages(token)
+      ]);
+      setImages(Array.isArray(imagesData) ? imagesData : []);
+      setAboutImages(Array.isArray(aboutData) ? aboutData : []);
     } catch (err: any) {
       console.error('Failed to load managed images', err);
       setError(err?.message || 'Failed to load images. Please check server connection.');
@@ -108,6 +121,79 @@ export const ImageManagementTab: React.FC = () => {
   useEffect(() => {
     fetchImages();
   }, []);
+
+  const openAboutModal = (propertyId: 'sbm-hotel' | 'sbm-guest-house') => {
+    setAboutModalProperty(propertyId);
+    setAboutFile(null);
+    setAboutUrlInput('');
+  };
+
+  const handleAboutFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.match(/^image\/(jpeg|png|webp|jpg)$/i)) {
+      showNotification('error', 'Please select a valid image file (JPG, PNG, WEBP).');
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      showNotification('error', 'Image size exceeds 10MB limit.');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setAboutFile({
+          name: file.name,
+          size: file.size,
+          base64: reader.result
+        });
+        setAboutUrlInput('');
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAboutImageSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!aboutModalProperty) return;
+
+    const imageUrlToSave = aboutFile ? aboutFile.base64 : aboutUrlInput.trim();
+    if (!imageUrlToSave) {
+      showNotification('error', 'Please select an image file (JPG, PNG, WEBP) or enter a valid URL.');
+      return;
+    }
+
+    setAboutIsSubmitting(true);
+    try {
+      const title = aboutModalProperty === 'sbm-hotel' ? 'SBM Hotel' : 'SBM 2 Guest House';
+      const caption = aboutModalProperty === 'sbm-hotel' ? 'Main Temple Road, Salasar' : 'Temple Approach Road, Salasar';
+      await api.saveAboutImage(token, aboutModalProperty, imageUrlToSave, title, caption);
+      showNotification('success', 'About page image updated successfully.');
+      setAboutModalProperty(null);
+      setAboutFile(null);
+      setAboutUrlInput('');
+      fetchImages();
+    } catch (err: any) {
+      console.error('About image save failed', err);
+      showNotification('error', err?.message || 'Unable to upload image. Please try again.');
+    } finally {
+      setAboutIsSubmitting(false);
+    }
+  };
+
+  const handleRemoveAboutImage = async (propertyId: 'sbm-hotel' | 'sbm-guest-house') => {
+    try {
+      await api.deleteAboutImage(token, propertyId);
+      showNotification('success', 'About page image removed. Public About page will now use fallback.');
+      fetchImages();
+    } catch (err: any) {
+      console.error('Failed to remove About image', err);
+      showNotification('error', err?.message || 'Failed to remove image.');
+    }
+  };
 
   // 1. Room Images
   const deluxeImages = (images || []).filter(
@@ -133,6 +219,17 @@ export const ImageManagementTab: React.FC = () => {
 
   const sbmHotelPrimaryCover = sbmHotelCoverImages.find(img => img.isPrimaryCover) || sbmHotelCoverImages[0];
   const sbmGuestHousePrimaryCover = sbmGuestHouseCoverImages.find(img => img.isPrimaryCover) || sbmGuestHouseCoverImages[0];
+
+  // 4. Dedicated About Page Images
+  const sbmHotelAboutImage = aboutImages.find(
+    img => img.property_id === 'sbm-hotel' || img.property_id === 'prop-sbm-hotel'
+  );
+  const sbmGuestHouseAboutImage = aboutImages.find(
+    img => img.property_id === 'sbm-guest-house' || img.property_id === 'prop-sbm-guesthouse'
+  );
+
+  const sbmHotelAboutPreviewUrl = sbmHotelAboutImage?.image_url || sbmHotelPrimaryCover?.imageUrl || DEFAULT_PHOTOS.sbmHotelExterior;
+  const sbmGuestHouseAboutPreviewUrl = sbmGuestHouseAboutImage?.image_url || sbmGuestHousePrimaryCover?.imageUrl || DEFAULT_PHOTOS.sbmGuestHouseExterior;
 
   // 3. Hotel Gallery Images (General property amenities, excluding room categories and dedicated property covers)
   const hotelGalleryImages = (images || []).filter(
@@ -530,6 +627,22 @@ export const ImageManagementTab: React.FC = () => {
         >
           <Building2 className="w-4 h-4 text-[#C5A059]" />
           PROPERTY COVER IMAGES ({propertyCoverImages.length})
+        </button>
+
+        <button
+          id="nav-about-page-tab"
+          onClick={() => {
+            setMainView('about-page');
+            setSelectedRoomForGallery(null);
+          }}
+          className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all relative cursor-pointer flex items-center gap-2 ${
+            mainView === 'about-page'
+              ? 'text-[#1A1A1A] border-b-2 border-[#C5A059]'
+              : 'text-stone-500 hover:text-stone-800'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-[#C5A059]" />
+          ABOUT PAGE IMAGES ({aboutImages.length})
         </button>
       </div>
 
@@ -1621,6 +1734,305 @@ export const ImageManagementTab: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MAIN VIEW 4: ABOUT PAGE IMAGES */}
+      {!loading && !error && mainView === 'about-page' && (
+        <div className="space-y-6">
+          {/* Header Banner */}
+          <div className="bg-[#1A1A1A] text-white p-5 sm:p-6 border-b-2 border-[#C5A059] flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-[#C5A059]" />
+                <h2 className="text-lg font-serif font-semibold text-white">About Page Image Management</h2>
+              </div>
+              <p className="text-xs text-stone-300 mt-1 max-w-2xl leading-relaxed">
+                Manage the dedicated photos displayed on the public <strong className="text-[#C5A059]">About Page (/about)</strong>.
+                You can independently upload, replace, or remove the photo for each property.
+              </p>
+            </div>
+            <div className="bg-[#262626] px-3.5 py-2 border border-white/10 text-xs flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+              <span className="text-stone-300">Live Sync to Public About Page</span>
+            </div>
+          </div>
+
+          {/* Cards Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* CARD 1: SBM HOTEL */}
+            <div id="about-card-sbm-hotel" className="bg-white border border-[#C5A059]/20 shadow-sm p-6 space-y-5 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3 h-3 rounded-full bg-[#C5A059] ring-2 ring-[#C5A059]/20" />
+                    <div>
+                      <h3 className="text-xl font-serif font-semibold text-[#1A1A1A]">SBM Hotel</h3>
+                      <p className="text-[11px] text-stone-500">Main Temple Road, Salasar • Property ID: sbm-hotel</p>
+                    </div>
+                  </div>
+                  {sbmHotelAboutImage ? (
+                    <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-1 border border-emerald-200 flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-600" /> Active
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold bg-amber-50 text-amber-700 px-2.5 py-1 border border-amber-200">
+                      Fallback Cover Active
+                    </span>
+                  )}
+                </div>
+
+                {/* Image Preview */}
+                <div className="relative h-56 bg-stone-100 border border-stone-200 overflow-hidden shadow-inner group">
+                  <ManagedImageDisplay
+                    src={sbmHotelAboutPreviewUrl}
+                    alt="SBM Hotel About Page Image"
+                    className="w-full h-full object-cover"
+                    fallbackType="hotel"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute bottom-3 left-3 right-3 text-white flex items-center justify-between">
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-[#C5A059] tracking-[0.2em] bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
+                        SBM Hotel
+                      </span>
+                      <p className="text-xs font-serif text-white font-medium mt-0.5">Main Temple Road, Salasar</p>
+                    </div>
+                    <span className="text-[10px] text-stone-300 bg-black/60 px-2 py-0.5 border border-white/10">
+                      Card 1 on /about
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-stone-600 space-y-1 bg-stone-50 p-3 rounded border border-stone-200">
+                  <p className="font-semibold text-stone-800">Status & Source:</p>
+                  {sbmHotelAboutImage ? (
+                    <p className="text-emerald-700 flex items-center gap-1 text-[11px]">
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      Custom About Page image is currently active and live.
+                    </p>
+                  ) : (
+                    <p className="text-stone-500 text-[11px]">
+                      No custom About image uploaded. Public page uses the primary property cover photo.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openAboutModal('sbm-hotel')}
+                    className="px-4 py-2 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#C5A059] text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-[#C5A059]" />
+                    {sbmHotelAboutImage ? 'Replace Image' : 'Upload New Image'}
+                  </button>
+                  {sbmHotelAboutImage && (
+                    <button
+                      onClick={() => handleRemoveAboutImage('sbm-hotel')}
+                      className="px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Remove custom About image and use fallback cover"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Remove Image
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* CARD 2: SBM 2 GUEST HOUSE */}
+            <div id="about-card-sbm-guest-house" className="bg-white border border-[#C5A059]/20 shadow-sm p-6 space-y-5 flex flex-col justify-between">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2.5">
+                    <span className="w-3 h-3 rounded-full bg-[#C5A059] ring-2 ring-[#C5A059]/20" />
+                    <div>
+                      <h3 className="text-xl font-serif font-semibold text-[#1A1A1A]">SBM 2 Guest House</h3>
+                      <p className="text-[11px] text-stone-500">Temple Approach Road, Salasar • Property ID: sbm-guest-house</p>
+                    </div>
+                  </div>
+                  {sbmGuestHouseAboutImage ? (
+                    <span className="text-[11px] font-semibold bg-emerald-50 text-emerald-700 px-2.5 py-1 border border-emerald-200 flex items-center gap-1">
+                      <Check className="w-3 h-3 text-emerald-600" /> Active
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-semibold bg-amber-50 text-amber-700 px-2.5 py-1 border border-amber-200">
+                      Fallback Cover Active
+                    </span>
+                  )}
+                </div>
+
+                {/* Image Preview */}
+                <div className="relative h-56 bg-stone-100 border border-stone-200 overflow-hidden shadow-inner group">
+                  <ManagedImageDisplay
+                    src={sbmGuestHouseAboutPreviewUrl}
+                    alt="SBM 2 Guest House About Page Image"
+                    className="w-full h-full object-cover"
+                    fallbackType="guest-house"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none" />
+                  <div className="absolute bottom-3 left-3 right-3 text-white flex items-center justify-between">
+                    <div>
+                      <span className="text-[9px] uppercase font-bold text-[#C5A059] tracking-[0.2em] bg-black/40 px-2 py-0.5 rounded backdrop-blur-sm">
+                        SBM 2 Guest House
+                      </span>
+                      <p className="text-xs font-serif text-white font-medium mt-0.5">Temple Approach Road, Salasar</p>
+                    </div>
+                    <span className="text-[10px] text-stone-300 bg-black/60 px-2 py-0.5 border border-white/10">
+                      Card 2 on /about
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-stone-600 space-y-1 bg-stone-50 p-3 rounded border border-stone-200">
+                  <p className="font-semibold text-stone-800">Status & Source:</p>
+                  {sbmGuestHouseAboutImage ? (
+                    <p className="text-emerald-700 flex items-center gap-1 text-[11px]">
+                      <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      Custom About Page image is currently active and live.
+                    </p>
+                  ) : (
+                    <p className="text-stone-500 text-[11px]">
+                      No custom About image uploaded. Public page uses the primary property cover photo.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-stone-200 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => openAboutModal('sbm-guest-house')}
+                    className="px-4 py-2 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#C5A059] text-white transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  >
+                    <Upload className="w-3.5 h-3.5 text-[#C5A059]" />
+                    {sbmGuestHouseAboutImage ? 'Replace Image' : 'Upload New Image'}
+                  </button>
+                  {sbmGuestHouseAboutImage && (
+                    <button
+                      onClick={() => handleRemoveAboutImage('sbm-guest-house')}
+                      className="px-3 py-2 text-xs font-medium text-rose-600 hover:bg-rose-50 border border-rose-200 transition-colors flex items-center gap-1 cursor-pointer"
+                      title="Remove custom About image and use fallback cover"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Remove Image
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ABOUT PAGE IMAGE UPLOAD / REPLACE */}
+      {aboutModalProperty && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white border border-[#C5A059]/30 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-xl">
+            <div className="p-5 border-b border-stone-200 flex items-center justify-between bg-stone-50">
+              <div className="flex items-center gap-2">
+                <Upload className="w-4 h-4 text-[#C5A059]" />
+                <h3 className="text-base font-serif font-semibold text-[#1A1A1A]">
+                  {aboutModalProperty === 'sbm-hotel' ? 'SBM Hotel' : 'SBM 2 Guest House'} — About Page Image
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setAboutModalProperty(null);
+                  setAboutFile(null);
+                  setAboutUrlInput('');
+                }}
+                className="p-1 text-stone-400 hover:text-stone-700 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleAboutImageSubmit} className="p-6 space-y-4">
+              {/* File input */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  Choose Image File (JPG, PNG, WEBP)
+                </label>
+                <input
+                  ref={aboutFileInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/jpg"
+                  onChange={handleAboutFileChange}
+                  className="hidden"
+                />
+                <div
+                  onClick={() => aboutFileInputRef.current?.click()}
+                  className="border-2 border-dashed border-stone-300 hover:border-[#C5A059] p-6 text-center cursor-pointer transition-colors bg-stone-50 hover:bg-stone-100/50"
+                >
+                  <Upload className="w-8 h-8 text-[#C5A059] mx-auto mb-2" />
+                  <p className="text-xs font-medium text-stone-700">
+                    {aboutFile ? aboutFile.name : 'Click to browse image from computer'}
+                  </p>
+                  <p className="text-[10px] text-stone-500 mt-1">
+                    Supports JPG, JPEG, PNG, WEBP (Max 10MB)
+                  </p>
+                </div>
+              </div>
+
+              {/* Preview if selected */}
+              {(aboutFile || aboutUrlInput.trim()) && (
+                <div>
+                  <span className="block text-[11px] font-semibold text-stone-700 mb-1">Selected Preview:</span>
+                  <div className="h-44 bg-stone-100 border border-stone-200 overflow-hidden">
+                    <img
+                      src={aboutFile ? aboutFile.base64 : aboutUrlInput.trim()}
+                      alt="About Preview"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Or direct URL input */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  Or Provide Direct Image URL
+                </label>
+                <input
+                  type="url"
+                  value={aboutUrlInput}
+                  onChange={(e) => {
+                    setAboutUrlInput(e.target.value);
+                    if (e.target.value) setAboutFile(null);
+                  }}
+                  placeholder="https://images.unsplash.com/photo-..."
+                  className="w-full text-xs px-3 py-2 border border-stone-300 focus:outline-none focus:border-[#C5A059]"
+                />
+              </div>
+
+              {/* Submit buttons */}
+              <div className="pt-3 border-t border-stone-200 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAboutModalProperty(null);
+                    setAboutFile(null);
+                    setAboutUrlInput('');
+                  }}
+                  className="px-4 py-2 text-xs font-medium text-stone-600 hover:bg-stone-100 cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={aboutIsSubmitting || (!aboutFile && !aboutUrlInput.trim())}
+                  className="px-5 py-2 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#C5A059] text-white transition-all disabled:opacity-50 cursor-pointer"
+                >
+                  {aboutIsSubmitting ? 'Saving Image...' : 'Save About Page Image'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

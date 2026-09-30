@@ -861,6 +861,66 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                     </div>
                   </div>
 
+                  {/* Email Dispatch Status */}
+                  <div className="border border-stone-200 p-4 space-y-3 bg-white">
+                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-[#C5A059] border-b border-stone-100 pb-1.5 flex justify-between items-center">
+                      <span className="flex items-center gap-1.5">
+                        <Mail className="w-3.5 h-3.5 text-[#C5A059]" />
+                        <span>Automated Email Notification Status</span>
+                      </span>
+                    </h4>
+
+                    <div className="grid grid-cols-2 gap-3 text-[11px]">
+                      <div>
+                        <span className="text-[#666666] block">Customer Confirmation:</span>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          {selectedBooking.customer_email_status === 'sent' ? (
+                            <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded text-[10px] flex items-center gap-1">
+                              ✓ Sent
+                            </span>
+                          ) : selectedBooking.customer_email_status === 'failed' ? (
+                            <span className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 border border-rose-200 rounded text-[10px] flex items-center gap-1">
+                              ✕ Failed
+                            </span>
+                          ) : (
+                            <span className="text-stone-700 font-medium bg-stone-100 px-2 py-0.5 border border-stone-200 rounded text-[10px]">
+                              {selectedBooking.customer_email_status || 'Delivered'}
+                            </span>
+                          )}
+                          {selectedBooking.customer_email_sent_at && (
+                            <span className="text-[10px] text-stone-400">
+                              ({new Date(selectedBooking.customer_email_sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-[#666666] block">Hotel Admin Alert:</span>
+                        <div className="mt-1 flex items-center gap-1.5">
+                          {selectedBooking.admin_email_status === 'sent' ? (
+                            <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded text-[10px] flex items-center gap-1">
+                              ✓ Sent
+                            </span>
+                          ) : selectedBooking.admin_email_status === 'failed' ? (
+                            <span className="text-rose-700 font-bold bg-rose-50 px-2 py-0.5 border border-rose-200 rounded text-[10px] flex items-center gap-1">
+                              ✕ Failed
+                            </span>
+                          ) : (
+                            <span className="text-stone-700 font-medium bg-stone-100 px-2 py-0.5 border border-stone-200 rounded text-[10px]">
+                              {selectedBooking.admin_email_status || 'Delivered'}
+                            </span>
+                          )}
+                          {selectedBooking.admin_email_sent_at && (
+                            <span className="text-[10px] text-stone-400">
+                              ({new Date(selectedBooking.admin_email_sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Special Requests */}
                   {selectedBooking.special_request && (
                     <div className="bg-amber-50/60 border border-amber-200 p-3 text-xs">
@@ -870,8 +930,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                   )}
 
                   {/* Actions in Modal */}
-                  <div className="flex justify-between items-center pt-3 border-t border-stone-200">
-                    <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap justify-between items-center gap-2 pt-3 border-t border-stone-200">
+                    <div className="flex flex-wrap items-center gap-2">
                       {selectedBooking.payment_status !== 'Paid' && selectedBooking.payment_status !== 'Completed' && (
                         <button
                           onClick={async () => {
@@ -884,6 +944,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                           Mark as Paid (Front Desk)
                         </button>
                       )}
+
+                      <button
+                        onClick={async () => {
+                          const token = getAdminToken() || '';
+                          try {
+                            const res = await api.resendBookingEmail(token, selectedBooking.id, 'customer');
+                            if (res.booking) {
+                              setSelectedBooking(res.booking);
+                              setBookings(bookings.map(b => b.id === res.booking?.id ? res.booking : b));
+                            }
+                            alert('Confirmation email sent successfully.');
+                          } catch (err: any) {
+                            alert(`Failed to send email: ${err?.message || err}`);
+                          }
+                        }}
+                        className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold px-3 py-2 text-[10px] uppercase tracking-wider cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Mail className="w-3.5 h-3.5 text-[#C5A059]" />
+                        <span>Resend Customer Email</span>
+                      </button>
                     </div>
 
                     <div className="flex items-center gap-2">

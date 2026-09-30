@@ -239,33 +239,38 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="relative w-full max-w-2xl bg-white border border-[#C5A059]/30 shadow-2xl text-[#1A1A1A] my-8 overflow-hidden">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-black/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4">
+      <div className={`relative w-full ${step === 3 ? 'max-w-3xl' : 'max-w-2xl'} max-h-[92vh] flex flex-col bg-white border border-[#C5A059]/30 shadow-2xl text-[#1A1A1A] my-auto overflow-hidden`}>
         {/* Header */}
-        <div className="bg-[#1A1A1A] px-6 py-4 flex justify-between items-center text-white border-b-2 border-[#C5A059]">
-          <div>
-            <h3 className="text-lg font-serif font-medium text-white">
+        <div className="bg-[#1A1A1A] px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center text-white border-b-2 border-[#C5A059] shrink-0">
+          <div className="min-w-0 pr-2">
+            <h3 className="text-base sm:text-lg font-serif font-medium text-white truncate">
               {step === 3 ? 'Reservation Confirmed' : 'Complete Your Booking'}
             </h3>
-            <p className="text-xs text-[#C5A059] font-medium tracking-wide">
+            <p className="text-xs text-[#C5A059] font-medium tracking-wide truncate">
               {selectedResult.property.name} — {selectedResult.roomType.name}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 text-white/70 hover:text-white transition-colors cursor-pointer"
+            className="p-1.5 text-white/70 hover:text-white transition-colors cursor-pointer shrink-0"
+            aria-label="Close modal"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* Modal Body */}
-        {step === 3 && confirmedBooking ? (
-          <div className="p-6">
-            <BookingVoucher booking={confirmedBooking} property={selectedResult.property} onClose={onClose} />
-          </div>
-        ) : (
-          <div className="p-6 space-y-6">
+        <div className="overflow-y-auto flex-1 min-h-0">
+          {step === 3 && confirmedBooking ? (
+            <BookingVoucher
+              booking={confirmedBooking}
+              property={selectedResult.property}
+              onClose={onClose}
+              isEmbeddedInModal={true}
+            />
+          ) : (
+            <div className="p-4 sm:p-6 space-y-5 sm:space-y-6">
             {/* Step Progress Bar */}
             <div className="flex items-center justify-between border-b border-stone-100 pb-4 text-xs uppercase tracking-widest font-semibold text-[#999999]">
               <div className={`flex items-center gap-2 ${step >= 1 ? 'text-[#C5A059]' : ''}`}>
@@ -621,6 +626,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
         )}
       </div>
     </div>
-  );
+  </div>
+);
 };
 

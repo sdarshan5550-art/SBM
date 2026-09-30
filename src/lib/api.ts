@@ -22,7 +22,8 @@ import {
   ChannelRateMapping,
   SyncJob,
   NormalizedOTAReservation,
-  ChannelInventorySummary
+  ChannelInventorySummary,
+  AboutPageImage
 } from '../types';
 
 const ADMIN_TOKEN_KEY = 'sbm_admin_token';
@@ -388,6 +389,36 @@ export const api = {
     request<ManagedImage[]>('/api/admin/images/reorder', {
       method: 'PUT',
       body: JSON.stringify({ orderedIds })
+    }),
+
+  // Dedicated About Page Images
+  getAboutImages: () => request<AboutPageImage[]>('/api/about-images'),
+  getAdminAboutImages: (token?: string) => request<AboutPageImage[]>('/api/admin/about-images'),
+  saveAboutImage: (token: string, propertyId: string, imageUrl: string, title?: string, caption?: string) =>
+    request<AboutPageImage>('/api/admin/about-images', {
+      method: 'POST',
+      body: JSON.stringify({ propertyId, imageUrl, title, caption })
+    }),
+  deleteAboutImage: (token: string, propertyId: string) =>
+    request<{ success: boolean; message: string }>(`/api/admin/about-images/${propertyId}`, {
+      method: 'DELETE'
+    }),
+
+  // Email Notification Services
+  resendBookingEmail: (token: string, bookingId: string, type: 'customer' | 'admin' | 'both' = 'customer') =>
+    request<{ success: boolean; message: string; results?: any; booking?: Booking }>(`/api/admin/bookings/${bookingId}/resend-email`, {
+      method: 'POST',
+      body: JSON.stringify({ type })
+    }),
+  getEmailStatus: (token?: string) => request<any>('/api/admin/email/status'),
+  verifySmtp: (token?: string) => request<{ success: boolean; message: string; details?: any }>('/api/admin/email/verify-smtp', {
+    method: 'POST',
+    body: JSON.stringify({})
+  }),
+  sendTestEmail: (token: string, targetEmail: string, bookingId?: string) =>
+    request<{ success: boolean; simulated?: boolean; messageId?: string; recipient?: string; error?: string }>('/api/admin/email/test', {
+      method: 'POST',
+      body: JSON.stringify({ targetEmail, bookingId })
     }),
 
   // ==========================================

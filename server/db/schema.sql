@@ -367,3 +367,16 @@ CREATE TABLE IF NOT EXISTS channel_sync_events (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     processed_at TIMESTAMP WITH TIME ZONE
 );
+
+-- ==========================================================
+-- 19. ABOUT PAGE IMAGES TABLE (Admin Dedicated About Page Images)
+-- ==========================================================
+CREATE TABLE IF NOT EXISTS about_page_images (
+    id VARCHAR(64) PRIMARY KEY,
+    property_id VARCHAR(64) UNIQUE NOT NULL,
+    image_url TEXT NOT NULL,
+    title VARCHAR(255),
+    caption VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);

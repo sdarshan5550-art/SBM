@@ -1,5 +1,7 @@
-import 'dotenv/config';
+import dotenv from 'dotenv';
+dotenv.config({ override: true });
 import express from 'express';
+import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
@@ -38,37 +40,7 @@ const ai = new GoogleGenAI({
     }
   }
 });
-app.get('/api/debug/database', (req, res) => {
-  try {
-    const fs = require('fs');
-    const path = require('path');
 
-    const dataDir = process.env.SBM_DATA_DIR
-      ? path.resolve(process.env.SBM_DATA_DIR)
-      : path.resolve(process.cwd(), 'data');
-
-    const dbFile = path.join(dataDir, 'sbm_database.json');
-
-    const room = db
-      .getRoomTypes('sbm-hotel')
-      .find(r => r.id === 'room-sbm-deluxe');
-
-    res.json({
-      process_cwd: process.cwd(),
-      database_directory: dataDir,
-      database_file: dbFile,
-      database_file_exists: fs.existsSync(dbFile),
-      database_file_modified: fs.existsSync(dbFile)
-        ? fs.statSync(dbFile).mtime
-        : null,
-      deluxe_room: room || null
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      error: error.message
-    });
-  }
-});
 async function startServer() {
   // Initialize Database (PostgreSQL if DATABASE_URL is set, otherwise JSON fallback)
   await initializePostgres();
@@ -76,6 +48,35 @@ async function startServer() {
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
+
+  app.get('/api/debug/database', (req, res) => {
+    try {
+      const dataDir = process.env.SBM_DATA_DIR
+        ? path.resolve(process.env.SBM_DATA_DIR)
+        : path.resolve(process.cwd(), 'data');
+
+      const dbFile = path.join(dataDir, 'sbm_database.json');
+
+      const room = db
+        .getRoomTypes('sbm-hotel')
+        .find(r => r.id === 'room-sbm-deluxe');
+
+      res.json({
+        process_cwd: process.cwd(),
+        database_directory: dataDir,
+        database_file: dbFile,
+        database_file_exists: fs.existsSync(dbFile),
+        database_file_modified: fs.existsSync(dbFile)
+          ? fs.statSync(dbFile).mtime
+          : null,
+        deluxe_room: room || null
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        error: error.message
+      });
+    }
+  });
 
   // Middleware: Admin JWT Authentication Check
   const authenticateAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -1655,6 +1656,76 @@ res.json({
     }
   });
 
+  // --- DEDICATED ABOUT PAGE IMAGES (PUBLIC & ADMIN) ---
+  app.get('/api/about-images', (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      const images = db.getAboutPageImages();
+      res.json(images);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/about-images', authenticateAdmin, (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      const images = db.getAboutPageImages();
+      res.json(images);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/about-images', authenticateAdmin, (req, res) => {
+    try {
+      const { propertyId, property_id, imageUrl, image_url, title, caption } = req.body;
+      const effectivePropId = propertyId || property_id;
+      const effectiveImageUrl = imageUrl || image_url;
+
+      if (!effectivePropId || !effectiveImageUrl) {
+        return res.status(400).json({ error: 'Both propertyId (sbm-hotel or sbm-guest-house) and imageUrl are required.' });
+      }
+
+      const saved = db.saveAboutPageImage(effectivePropId, effectiveImageUrl, title, caption);
+      console.log(`[About Page Images] Saved dedicated image for property: ${effectivePropId}`);
+      res.status(200).json(saved);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/admin/about-images/:propertyId', authenticateAdmin, (req, res) => {
+    try {
+      const propertyId = req.params.propertyId;
+      const { imageUrl, image_url, title, caption } = req.body;
+      const effectiveImageUrl = imageUrl || image_url;
+
+      if (!effectiveImageUrl) {
+        return res.status(400).json({ error: 'imageUrl is required.' });
+      }
+
+      const saved = db.saveAboutPageImage(propertyId, effectiveImageUrl, title, caption);
+      console.log(`[About Page Images] Updated dedicated image for property: ${propertyId}`);
+      res.status(200).json(saved);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/admin/about-images/:propertyId', authenticateAdmin, (req, res) => {
+    try {
+      const propertyId = req.params.propertyId;
+      const deleted = db.deleteAboutPageImage(propertyId);
+      console.log(`[About Page Images] Deleted dedicated image for property: ${propertyId}, success=${deleted}`);
+      res.json({ success: true, message: 'About page image removed successfully.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- CHANNEL MANAGER CORE API ENDPOINTS ---
 
   // 1. Get All Channels
@@ -1990,7 +2061,7 @@ res.json({
         };
       }
 
-      const result = await emailService.sendBookingConfirmationEmail(sampleBooking);
+      const result = await emailService.sendBookingConfirmationEmail(sampleBooking, { force: true });
       res.json({
         success: result.success,
         simulated: result.simulated || false,
@@ -1998,6 +2069,56 @@ res.json({
         recipient: testRecipient,
         booking_number: sampleBooking.booking_number,
         error: result.error
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 15. Verify SMTP Server Connection
+  app.post('/api/admin/email/verify', authenticateAdmin, async (req, res) => {
+    try {
+      const result = await emailService.verifySmtp();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  app.post('/api/admin/email/verify-smtp', authenticateAdmin, async (req, res) => {
+    try {
+      const result = await emailService.verifySmtp();
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // 16. Admin Resend Confirmation Email
+  app.post('/api/admin/bookings/:id/resend-email', authenticateAdmin, async (req, res) => {
+    try {
+      const booking = db.getBookingByIdOrNumber(req.params.id);
+      if (!booking) {
+        return res.status(404).json({ error: 'Booking not found.' });
+      }
+
+      const { type } = req.body; // 'customer' or 'admin' or 'both'
+      const results: { customer?: any; admin?: any } = {};
+
+      if (!type || type === 'customer' || type === 'both') {
+        results.customer = await emailService.sendBookingConfirmationEmail(booking, { force: true });
+      }
+
+      if (type === 'admin' || type === 'both') {
+        results.admin = await emailService.sendAdminBookingNotification(booking, { force: true });
+      }
+
+      const updated = db.getBookingByIdOrNumber(req.params.id);
+      res.json({
+        success: true,
+        message: 'Email dispatch completed.',
+        results,
+        booking: updated
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

@@ -193,6 +193,12 @@ export interface Booking {
   created_at: string;
   updated_at: string;
   payments?: PaymentRecord[];
+  customer_email_status?: 'pending' | 'sent' | 'failed' | 'simulated';
+  admin_email_status?: 'pending' | 'sent' | 'failed' | 'simulated';
+  customer_email_sent_at?: string;
+  admin_email_sent_at?: string;
+  customer_email_error?: string;
+  admin_email_error?: string;
 }
 
 export interface PMSCalendarData {
@@ -472,6 +478,16 @@ export interface ManagedImage {
   isMainForRoom?: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AboutPageImage {
+  id: string;
+  property_id: 'sbm-hotel' | 'sbm-guest-house' | string;
+  image_url: string;
+  title?: string;
+  caption?: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface ConciergeChatMessage {
