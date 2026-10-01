@@ -62,8 +62,8 @@ interface DatabaseData {
   sync_jobs?: SyncJob[];
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const currentFilename = typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url);
+const __dirname = path.dirname(currentFilename);
 
 const DATA_DIR = process.env.SBM_DATA_DIR
   ? path.resolve(process.env.SBM_DATA_DIR)
