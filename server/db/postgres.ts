@@ -77,8 +77,12 @@ async function runDataMigrationFromJSON(client: PoolClient) {
     const propCountRes = await client.query('SELECT COUNT(*) FROM properties');
     const propertyCount = parseInt(propCountRes.rows[0].count, 10);
 
-    const jsonPath = path.join(process.cwd(), 'data', 'sbm_database.json');
-    if (!fs.existsSync(jsonPath)) return;
+   const DATA_DIR = process.env.SBM_DATA_DIR
+  ? path.resolve(process.env.SBM_DATA_DIR)
+  : path.resolve(process.cwd(), 'data');
+
+const jsonPath = path.join(DATA_DIR, 'sbm_database.json');
+if (!fs.existsSync(jsonPath)) return;
 
     if (propertyCount > 0) {
       console.log(`ℹ️ [SBM Hotel PMS Migration] PostgreSQL already contains ${propertyCount} properties. Checking sync...`);
