@@ -1,0 +1,15 @@
+{
+  "name": "SBM Hotel Salasar",
+  "short_name": "SBM Hotel",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1A1A1A",
+  "theme_color": "#C5A059",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

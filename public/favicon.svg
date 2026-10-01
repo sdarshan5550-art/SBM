@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Luxurious Dark Rounded Background matching brand theme -->
+  <rect width="100" height="100" rx="20" fill="#1A1A1A"/>
+  <!-- Gold Border Accent -->
+  <rect x="3" y="3" width="94" height="94" rx="17" fill="none" stroke="#D4AF37" stroke-width="2.5"/>
+  
+  <!-- Centered Hotel Tower Icon (scaled and centered from sbm_logo.svg) -->
+  <g transform="translate(15, 10) scale(1.15)">
+    <!-- Top sign board -->
+    <rect x="22" y="4" width="26" height="12" rx="2" fill="#FAF6ED" stroke="#D4AF37" stroke-width="2"/>
+    <text x="35" y="12" font-family="serif" font-size="6" font-weight="bold" fill="#D4AF37" text-anchor="middle">SBM</text>
+    
+    <!-- Tower Body -->
+    <polygon points="18,18 52,18 56,62 14,62" fill="#FAF6ED" stroke="#D4AF37" stroke-width="2" stroke-linejoin="round"/>
+    
+    <!-- Floor divisions -->
+    <line x1="17" y1="28" x2="53" y2="28" stroke="#D4AF37" stroke-width="1.8"/>
+    <line x1="16" y1="38" x2="54" y2="38" stroke="#D4AF37" stroke-width="1.8"/>
+    <line x1="15" y1="48" x2="55" y2="48" stroke="#D4AF37" stroke-width="1.8"/>
+    
+    <!-- Windows -->
+    <rect x="22" y="21" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+    <rect x="32" y="21" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+    <rect x="42" y="21" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+
+    <rect x="21" y="31" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+    <rect x="32" y="31" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+    <rect x="43" y="31" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+
+    <rect x="20" y="41" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+    <rect x="32" y="41" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+    <rect x="44" y="41" width="5" height="5" rx="0.5" fill="#D4AF37"/>
+
+    <rect x="19" y="51" width="5" height="6" rx="0.5" fill="#D4AF37"/>
+    <rect x="32" y="51" width="5" height="6" rx="0.5" fill="#D4AF37"/>
+    <rect x="45" y="51" width="5" height="6" rx="0.5" fill="#D4AF37"/>
+
+    <!-- Entrance Canopy / Base -->
+    <polygon points="10,62 60,62 64,72 6,72" fill="#D4AF37"/>
+    <path d="M 6,72 L 64,72" stroke="#B8860B" stroke-width="2"/>
+  </g>
+</svg>
