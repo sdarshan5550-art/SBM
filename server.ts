@@ -45,6 +45,12 @@ async function startServer() {
   // Initialize Database (PostgreSQL if DATABASE_URL is set, otherwise JSON fallback)
   await initializePostgres();
 
+  // Channel Manager: Recover any stuck sync jobs from prior server crash or reboot
+  const recoveredJobs = db.recoverStuckSyncJobs(5 * 60 * 1000);
+  if (recoveredJobs > 0) {
+    console.log(`♻️ [ChannelManager] Recovered ${recoveredJobs} stuck sync job(s) from previous session.`);
+  }
+
   const app = express();
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ limit: '10mb', extended: true }));
@@ -174,6 +180,17 @@ async function startServer() {
   app.post('/api/bookings', (req, res) => {
     try {
       const booking = db.createBooking(req.body);
+
+      // Trigger Channel Manager Central Inventory Synchronization across all channels
+      if (booking && booking.property_code && booking.room_type_id) {
+        channelManagerService.queueInventorySync({
+          propertyCode: booking.property_code,
+          roomTypeId: booking.room_type_id,
+          startDate: booking.check_in,
+          endDate: booking.check_out,
+          triggerReason: `Direct Website Booking: ${booking.booking_number}`
+        }).catch(err => console.error('[ChannelManager] Direct booking sync queue error:', err?.message || err));
+      }
 
       // Asynchronously trigger customer confirmation & admin alert
       if (booking.booking_status === 'Confirmed' || booking.payment_status === 'Completed' || booking.payment_status === 'Paid') {
@@ -1778,12 +1795,75 @@ res.json({
     }
   });
 
+  // 4b. Validate Channel Configuration (Pre-Activation Audit)
+  app.post('/api/admin/channels/:id/validate', authenticateAdmin, (req, res) => {
+    try {
+      const validation = channelManagerService.validateChannelConfig(req.params.id);
+      res.json(validation);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 4c. Activate Channel (Strict Workflow Check + Initial Sync)
+  app.post('/api/admin/channels/:id/activate', authenticateAdmin, async (req, res) => {
+    try {
+      const admin = (req as any).admin;
+      const result = await channelManagerService.activateChannel(
+        req.params.id,
+        admin?.name || admin?.email || 'Admin'
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 4d. Disable Channel
+  app.post('/api/admin/channels/:id/disable', authenticateAdmin, (req, res) => {
+    try {
+      const admin = (req as any).admin;
+      const result = channelManagerService.disableChannel(
+        req.params.id,
+        admin?.name || admin?.email || 'Admin'
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 4e. Channel Health Overview
+  app.get('/api/admin/channels/health', authenticateAdmin, (req, res) => {
+    try {
+      const health = channelManagerService.getChannelHealthSummary();
+      res.json(health);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // 5. Manual Sync for Single Channel
   app.post('/api/admin/channels/:id/sync', authenticateAdmin, async (req, res) => {
     try {
       const admin = (req as any).admin;
       const result = await channelManagerService.syncChannel(
         req.params.id,
+        admin?.name || admin?.email || 'Admin'
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 5b. Manual Scoped Synchronization (Single or All Active)
+  app.post('/api/admin/channels/manual-sync', authenticateAdmin, async (req, res) => {
+    try {
+      const admin = (req as any).admin;
+      const { channelId, scope, allActive } = req.body;
+      const result = await channelManagerService.manualScopedSync(
+        { channelId, scope: scope || 'ALL', allActive: Boolean(allActive) },
         admin?.name || admin?.email || 'Admin'
       );
       res.json(result);
@@ -1987,6 +2067,188 @@ res.json({
       );
       res.json(result);
     } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 14. Channel Restrictions (Get, Save, Bulk Update)
+  app.get('/api/admin/channels/restrictions', authenticateAdmin, (req, res) => {
+    try {
+      const { propertyCode, startDate, endDate } = req.query;
+      const restrictions = channelManagerService.getRestrictions(
+        propertyCode as string,
+        startDate as string,
+        endDate as string
+      );
+      res.json(restrictions);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/channels/restrictions', authenticateAdmin, (req, res) => {
+    try {
+      const admin = (req as any).admin;
+      const saved = channelManagerService.saveRestriction(
+        req.body,
+        admin?.name || admin?.email || 'Admin'
+      );
+      res.status(201).json(saved);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/channels/restrictions/bulk', authenticateAdmin, (req, res) => {
+    try {
+      const admin = (req as any).admin;
+      const saved = channelManagerService.bulkUpdateRestrictions(
+        req.body,
+        admin?.name || admin?.email || 'Admin'
+      );
+      res.status(201).json(saved);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 14b. Central Rate Calendar
+  app.get('/api/admin/channels/rates', authenticateAdmin, (req, res) => {
+    try {
+      const { propertyCode, startDate, endDate, roomTypeId } = req.query;
+      const today = new Date().toISOString().split('T')[0];
+      const defaultEnd = new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0];
+
+      const rates = channelManagerService.getRateCalendar(
+        (propertyCode as any) || 'all',
+        (startDate as string) || today,
+        (endDate as string) || defaultEnd,
+        roomTypeId as string
+      );
+      res.json(rates);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 14c. Manual Rate Adjustment & Synchronization Dispatch
+  app.post('/api/admin/channels/rates/manual-update', authenticateAdmin, async (req, res) => {
+    try {
+      const admin = (req as any).admin;
+      const result = await channelManagerService.updateManualRates(
+        req.body,
+        admin?.name || admin?.email || 'Admin'
+      );
+      res.json(result);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  // 14d. Central Reservation Hub
+  app.get('/api/admin/channels/reservations', authenticateAdmin, (req, res) => {
+    try {
+      const { propertyCode, source, status, search, startDate, endDate, page, limit } = req.query;
+      const result = channelManagerService.getReservationsHub({
+        propertyCode: propertyCode as string,
+        source: source as string,
+        status: status as string,
+        search: search as string,
+        startDate: startDate as string,
+        endDate: endDate as string,
+        page: page ? Number(page) : 1,
+        limit: limit ? Number(limit) : 50
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 14e. Audit Logs for Channel Manager
+  app.get('/api/admin/channels/audit-logs', authenticateAdmin, (req, res) => {
+    try {
+      const { channelCode, action, limit } = req.query;
+      const logs = auditService.getLogs();
+      let filtered = [...logs];
+      if (channelCode && channelCode !== 'all') {
+        filtered = filtered.filter(l => l.description?.toUpperCase().includes(String(channelCode).toUpperCase()));
+      }
+      if (action && action !== 'all') {
+        filtered = filtered.filter(l => l.action === action);
+      }
+      if (limit) {
+        filtered = filtered.slice(0, Number(limit));
+      }
+      res.json(filtered);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // In-memory sliding window rate limiter for OTA Webhooks (max 60 requests per minute per IP/Channel)
+  const webhookRequests = new Map<string, number[]>();
+  function checkWebhookRateLimit(key: string, limit = 60, windowMs = 60000): boolean {
+    const now = Date.now();
+    const timestamps = webhookRequests.get(key) || [];
+    const valid = timestamps.filter(t => now - t < windowMs);
+    if (valid.length >= limit) {
+      return false;
+    }
+    valid.push(now);
+    webhookRequests.set(key, valid);
+    return true;
+  }
+
+  // 15. OTA Inbound Public Secure Webhook Endpoint (Callback receiver with signature/secret validation)
+  app.post('/api/webhooks/channel/:channelCode', async (req, res) => {
+    try {
+      const channelCode = req.params.channelCode.toUpperCase() as any;
+      const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
+
+      // Rate limit check
+      if (!checkWebhookRateLimit(`${channelCode}:${clientIp}`, 60, 60000)) {
+        res.setHeader('Retry-After', '60');
+        return res.status(429).json({ error: 'Too Many Requests: Webhook rate limit exceeded. Please wait 60 seconds.' });
+      }
+
+      const channel = channelManagerService.getChannels().find(c => c.code === channelCode);
+
+      if (!channel) {
+        return res.status(404).json({ error: `Unsupported channel: ${channelCode}` });
+      }
+
+      const { getChannelAdapter } = await import('./server/services/channelAdapter');
+      const adapter = getChannelAdapter(channelCode);
+
+      // Validate signature / secret against raw server-side configuration
+      if (adapter.validateWebhook) {
+        const rawConfig = db.getChannelRawConfig ? db.getChannelRawConfig(channel.id) : channel;
+        const validation = await adapter.validateWebhook(req.headers as any, req.body, rawConfig || channel);
+        if (!validation.valid) {
+          return res.status(401).json({ error: validation.error || 'Unauthorized webhook request' });
+        }
+      }
+
+      // Parse payload to NormalizedOTAReservation
+      const normalized = adapter.parseWebhookReservation ? adapter.parseWebhookReservation(req.body) : req.body;
+      if (!normalized || !normalized.externalReservationId) {
+        return res.status(400).json({ error: 'Unable to parse valid reservation from webhook payload.' });
+      }
+
+      const result = await channelManagerService.importOTAReservation(
+        normalized,
+        `Webhook: ${channel.name}`
+      );
+
+      res.status(200).json({
+        success: true,
+        channel: channelCode,
+        message: result.message,
+        booking_number: result.booking?.booking_number
+      });
+    } catch (err: any) {
+      console.error(`[OTA Webhook Error - ${req.params.channelCode}]`, err.message);
       res.status(400).json({ error: err.message });
     }
   });

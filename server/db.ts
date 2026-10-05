@@ -33,7 +33,9 @@ import {
   SyncJobStatus,
   SyncOperation,
   ChannelInventorySummary,
-  AboutPageImage
+  AboutPageImage,
+  ChannelRestriction,
+  PendingExternalEvent
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
 import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
@@ -60,6 +62,8 @@ interface DatabaseData {
   pms_rate_plans?: PMSRatePlan[];
   channel_rate_mappings?: ChannelRateMapping[];
   sync_jobs?: SyncJob[];
+  channel_restrictions?: ChannelRestriction[];
+  pending_external_events?: PendingExternalEvent[];
 }
 
 const currentFilename = typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url);
@@ -292,7 +296,7 @@ function getInitialData(): DatabaseData {
 
   return {
     properties,
-    room_types: roomTypes.map(rt => ({ ...rt, total_rooms: 0 })),
+    room_types: roomTypes,
     bookings: [],
     blocked_rooms: [],
     inquiries: [],
@@ -331,7 +335,8 @@ function getInitialData(): DatabaseData {
     channel_room_mappings: [],
     pms_rate_plans: getInitialPMSRatePlans(now),
     channel_rate_mappings: [],
-    sync_jobs: []
+    sync_jobs: [],
+    channel_restrictions: []
   };
 }
 
@@ -452,6 +457,46 @@ function getInitialChannels(now: string): ChannelConfig[] {
         autoSyncInventory: true,
         autoImportReservations: true,
         priceMultiplier: 1.20,
+        webhookEnabled: true
+      },
+      createdAt: now,
+      updatedAt: now,
+      mappedRoomsCount: 0,
+      mappedRatePlansCount: 0
+    },
+    {
+      id: 'chan-ctrip',
+      code: 'CTRIP',
+      name: 'Ctrip (Trip.com)',
+      type: 'OTA',
+      enabled: false,
+      connectionStatus: 'NOT_CONFIGURED',
+      property_code: 'both',
+      credentialsConfigured: false,
+      settings: {
+        autoSyncInventory: true,
+        autoImportReservations: true,
+        priceMultiplier: 1.15,
+        webhookEnabled: true
+      },
+      createdAt: now,
+      updatedAt: now,
+      mappedRoomsCount: 0,
+      mappedRatePlansCount: 0
+    },
+    {
+      id: 'chan-cleartrip',
+      code: 'CLEARTRIP',
+      name: 'Cleartrip',
+      type: 'OTA',
+      enabled: false,
+      connectionStatus: 'NOT_CONFIGURED',
+      property_code: 'both',
+      credentialsConfigured: false,
+      settings: {
+        autoSyncInventory: true,
+        autoImportReservations: true,
+        priceMultiplier: 1.15,
         webhookEnabled: true
       },
       createdAt: now,
@@ -927,6 +972,7 @@ class DatabaseService {
     this.data = this.loadData();
     this.syncRoomTypeImages();
     this.syncPropertyImages();
+    this.syncRoomCounts();
   }
 
   private loadData(): DatabaseData {
@@ -1122,15 +1168,63 @@ class DatabaseService {
 
         const blockedCount = blocks.reduce((sum, blk) => sum + (blk.quantity || 1), 0);
 
-        const occupiedOnNight = bookedCount + blockedCount;
+        // Active unexpired inventory holds (e.g. active Razorpay checkout sessions)
+        const nowIso = new Date().toISOString();
+        const activeHolds = (this.data.inventory_holds || []).filter((h: any) => {
+          if (h.room_type_id !== room.id && h.room_type_id !== room.room_code) return false;
+          if (h.status && h.status !== 'ACTIVE') return false;
+          if (h.expires_at && h.expires_at <= nowIso) return false; // Expired holds are ignored
+          return h.check_in <= nightDate && nightDate < h.check_out;
+        });
+
+        const holdCount = activeHolds.reduce((sum: number, h: any) => sum + (h.rooms_count || h.roomsCount || 1), 0);
+
+        const occupiedOnNight = bookedCount + blockedCount + holdCount;
         if (occupiedOnNight > maxOccupied) {
           maxOccupied = occupiedOnNight;
         }
       }
 
-      const availableCount = Math.max(0, room.total_rooms - maxOccupied);
+      // Check Channel Restrictions for DIRECT / ALL channels
+      let isRestricted = false;
+      if (this.data.channel_restrictions && this.data.channel_restrictions.length > 0) {
+        const applicableRestrictions = this.data.channel_restrictions.filter(
+          r => (r.property_code === room.property_code || r.property_code === property.code) &&
+               (r.room_type_id === room.id || r.room_type_id === room.room_code || r.room_type_id === 'all') &&
+               (r.channel_code === 'ALL' || r.channel_code === 'DIRECT' || !r.channel_code)
+        );
+
+        // 1. Stop Sell & Min/Max Stay check on each night
+        for (const nightDate of nightsList) {
+          const match = applicableRestrictions.find(r => r.date === nightDate);
+          if (match) {
+            if (match.stop_sell) {
+              isRestricted = true;
+              break;
+            }
+            if (match.min_stay && nights < match.min_stay) {
+              isRestricted = true;
+              break;
+            }
+            if (match.max_stay && nights > match.max_stay) {
+              isRestricted = true;
+              break;
+            }
+          }
+        }
+
+        // 2. Closed To Arrival (CTA) on check-in date
+        const cta = applicableRestrictions.find(r => r.date === query.check_in && r.closed_to_arrival);
+        if (cta) isRestricted = true;
+
+        // 3. Closed To Departure (CTD) on check-out date
+        const ctd = applicableRestrictions.find(r => r.date === query.check_out && r.closed_to_departure);
+        if (ctd) isRestricted = true;
+      }
+
+      const availableCount = isRestricted ? 0 : Math.max(0, room.total_rooms - maxOccupied);
       const isCapacityOk = room.capacity >= Math.ceil(totalGuests / (query.rooms || 1));
-      const isAvailable = availableCount >= (query.rooms || 1) && isCapacityOk;
+      const isAvailable = !isRestricted && availableCount >= (query.rooms || 1) && isCapacityOk;
 
       const subtotal = room.price_per_night * nights * (query.rooms || 1);
       const taxAmount = Math.round(subtotal * (this.data.settings.gst_percent / 100));
@@ -1565,12 +1659,20 @@ if (updates.price !== undefined) {
   public syncRoomCounts(): void {
     if (!this.data.room_types) return;
     const physicalRooms = this.data.physical_rooms || [];
-    for (const rt of this.data.room_types) {
-      const count = physicalRooms.filter(
-        pr => (pr.property_code === rt.property_code || pr.property_name === rt.property_id) &&
-              (pr.room_type_id === rt.id || pr.room_code === rt.room_code)
-      ).length;
-      rt.total_rooms = count;
+    if (physicalRooms.length > 0) {
+      for (const rt of this.data.room_types) {
+        const count = physicalRooms.filter(
+          pr => (pr.property_code === rt.property_code || pr.property_name === rt.property_id) &&
+                (pr.room_type_id === rt.id || pr.room_code === rt.room_code)
+        ).length;
+        rt.total_rooms = count;
+      }
+    } else {
+      for (const rt of this.data.room_types) {
+        if (!rt.total_rooms || rt.total_rooms === 0) {
+          rt.total_rooms = rt.room_code === 'family' ? 5 : 10;
+        }
+      }
     }
   }
 
@@ -1620,8 +1722,8 @@ if (updates.price !== undefined) {
   }
 
   public addActivity(
-    action: FrontDeskActivity['action'],
-    description: string,
+    actionOrObj: FrontDeskActivity['action'] | { action: FrontDeskActivity['action']; description: string; property_code?: PropertyCode; performed_by?: string },
+    description?: string,
     property_code?: PropertyCode,
     performed_by: string = 'Front Desk'
   ): FrontDeskActivity {
@@ -1630,14 +1732,31 @@ if (updates.price !== undefined) {
     const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
     const dateStr = now.toISOString().split('T')[0];
 
+    let finalAction: FrontDeskActivity['action'] = 'Status Update';
+    let finalDesc = '';
+    let finalPropCode: PropertyCode | undefined = property_code;
+    let finalPerformedBy = performed_by;
+
+    if (typeof actionOrObj === 'object' && actionOrObj !== null) {
+      finalAction = actionOrObj.action || 'Status Update';
+      finalDesc = actionOrObj.description || '';
+      finalPropCode = actionOrObj.property_code;
+      finalPerformedBy = actionOrObj.performed_by || 'Front Desk';
+    } else {
+      finalAction = actionOrObj as FrontDeskActivity['action'];
+      finalDesc = description || '';
+      finalPropCode = property_code;
+      finalPerformedBy = performed_by || 'Front Desk';
+    }
+
     const act: FrontDeskActivity = {
-      id: `act-${Date.now()}`,
+      id: `act-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       timestamp: timeStr,
       date: dateStr,
-      action,
-      description,
-      property_code,
-      performed_by
+      action: finalAction,
+      description: finalDesc,
+      property_code: finalPropCode,
+      performed_by: finalPerformedBy
     };
     this.data.activities.unshift(act);
     this.save();
@@ -1787,6 +1906,7 @@ if (updates.price !== undefined) {
       guest_id_type: input.guest_id_type,
       guest_id_number: input.guest_id_number,
       source: input.source || 'WEBSITE',
+      source_booking_id: input.source_booking_id,
       room_type_id: roomType.id,
       room_name: roomType.name,
       room_number: input.room_number || undefined,
@@ -2344,16 +2464,43 @@ if (updates.price !== undefined) {
   public getChannels(): ChannelConfig[] {
     if (!this.data.channels) {
       this.data.channels = getInitialChannels(new Date().toISOString());
+    } else {
+      // Ensure any newly added channels (CTRIP, CLEARTRIP) are populated if not present
+      const initialList = getInitialChannels(new Date().toISOString());
+      let added = false;
+      for (const initCh of initialList) {
+        if (!this.data.channels.some(c => c.code === initCh.code)) {
+          this.data.channels.push(initCh);
+          added = true;
+        }
+      }
+      if (added) this.save();
     }
     if (!this.data.channel_room_mappings) this.data.channel_room_mappings = [];
     if (!this.data.channel_rate_mappings) this.data.channel_rate_mappings = [];
 
-    // Dynamically calculate mapping counts
+    // Dynamically calculate mapping counts and mask sensitive secrets
     return this.data.channels.map(channel => {
       const mappedRooms = this.data.channel_room_mappings?.filter(m => m.channel_id === channel.id || m.channel_code === channel.code).length || 0;
       const mappedRates = this.data.channel_rate_mappings?.filter(m => m.channel_id === channel.id || m.channel_code === channel.code).length || 0;
+      
+      const maskedSettings = channel.settings ? {
+        ...channel.settings,
+        apiKeyMasked: channel.settings.apiKeyMasked
+          ? (channel.settings.apiKeyMasked.startsWith('********')
+              ? channel.settings.apiKeyMasked
+              : '********' + (channel.settings.apiKeyMasked.length > 4 ? channel.settings.apiKeyMasked.slice(-4) : ''))
+          : undefined,
+        webhookSecretMasked: channel.settings.webhookSecretMasked
+          ? (channel.settings.webhookSecretMasked.startsWith('********')
+              ? channel.settings.webhookSecretMasked
+              : '********' + (channel.settings.webhookSecretMasked.length > 4 ? channel.settings.webhookSecretMasked.slice(-4) : ''))
+          : undefined
+      } : undefined;
+
       return {
         ...channel,
+        settings: maskedSettings,
         mappedRoomsCount: channel.code === 'DIRECT' ? 4 : mappedRooms,
         mappedRatePlansCount: channel.code === 'DIRECT' ? 6 : mappedRates
       };
@@ -2364,6 +2511,12 @@ if (updates.price !== undefined) {
     return this.getChannels().find(c => c.id === id || c.code === id);
   }
 
+  // Server-only method: gets live unmasked settings for adapter handshake
+  public getChannelRawConfig(id: string): ChannelConfig | undefined {
+    if (!this.data.channels) return undefined;
+    return this.data.channels.find(c => c.id === id || c.code === id);
+  }
+
   public updateChannelConfig(id: string, updates: Partial<ChannelConfig>): ChannelConfig {
     if (!this.data.channels) this.data.channels = getInitialChannels(new Date().toISOString());
     const idx = this.data.channels.findIndex(c => c.id === id || c.code === id);
@@ -2372,19 +2525,35 @@ if (updates.price !== undefined) {
     const now = new Date().toISOString();
     const existing = this.data.channels[idx];
 
+    // Preserve existing unmasked secrets if user passes back masked string
+    let cleanApiKey = updates.settings?.apiKeyMasked;
+    if (cleanApiKey && cleanApiKey.startsWith('********')) {
+      cleanApiKey = existing.settings?.apiKeyMasked;
+    }
+
+    let cleanWebhookSecret = updates.settings?.webhookSecretMasked;
+    if (cleanWebhookSecret && cleanWebhookSecret.startsWith('********')) {
+      cleanWebhookSecret = existing.settings?.webhookSecretMasked;
+    }
+
+    const mergedSettings = {
+      ...existing.settings,
+      ...(updates.settings || {})
+    };
+
+    if (cleanApiKey !== undefined) mergedSettings.apiKeyMasked = cleanApiKey;
+    if (cleanWebhookSecret !== undefined) mergedSettings.webhookSecretMasked = cleanWebhookSecret;
+
     const updated: ChannelConfig = {
       ...existing,
       ...updates,
-      settings: {
-        ...existing.settings,
-        ...(updates.settings || {})
-      },
+      settings: mergedSettings,
       updatedAt: now
     };
 
     this.data.channels[idx] = updated;
     this.save();
-    return updated;
+    return this.getChannelById(id) || updated;
   }
 
   // --- CHANNEL ROOM MAPPING ---
@@ -2404,12 +2573,29 @@ if (updates.price !== undefined) {
     if (!this.data.channel_room_mappings) this.data.channel_room_mappings = [];
     const now = new Date().toISOString();
 
+    const channelId = mapping.channel_id || 'chan-booking-com';
+    const channelCode = mapping.channel_code || 'BOOKING_COM';
+    const otaRoomId = (mapping.channel_room_id || '').trim();
+
+    // Prevent duplicate OTA room mappings for the same channel
+    if (otaRoomId) {
+      const duplicate = this.data.channel_room_mappings.find(
+        m => m.id !== mapping.id &&
+             (m.channel_id === channelId || m.channel_code === channelCode) &&
+             m.channel_room_id.trim().toUpperCase() === otaRoomId.toUpperCase()
+      );
+      if (duplicate) {
+        throw new Error(`Duplicate OTA Room ID: '${otaRoomId}' is already mapped to ${duplicate.pms_room_type_name} for ${duplicate.channel_code}.`);
+      }
+    }
+
     if (mapping.id) {
       const idx = this.data.channel_room_mappings.findIndex(m => m.id === mapping.id);
       if (idx !== -1) {
         const updated: ChannelRoomMapping = {
           ...this.data.channel_room_mappings[idx],
           ...mapping,
+          channel_room_id: otaRoomId || this.data.channel_room_mappings[idx].channel_room_id,
           updated_at: now
         } as ChannelRoomMapping;
         this.data.channel_room_mappings[idx] = updated;
@@ -2421,12 +2607,12 @@ if (updates.price !== undefined) {
     // New Mapping
     const newMapping: ChannelRoomMapping = {
       id: `crm-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      channel_id: mapping.channel_id || 'chan-booking-com',
-      channel_code: mapping.channel_code || 'BOOKING_COM',
+      channel_id: channelId,
+      channel_code: channelCode,
       property_code: mapping.property_code || 'sbm-hotel',
       pms_room_type_id: mapping.pms_room_type_id || 'room-sbm-deluxe',
       pms_room_type_name: mapping.pms_room_type_name || 'Deluxe Room',
-      channel_room_id: mapping.channel_room_id || `OTA-ROOM-${Date.now()}`,
+      channel_room_id: otaRoomId || `OTA-ROOM-${Date.now()}`,
       channel_room_name: mapping.channel_room_name || 'Deluxe Double Room',
       is_active: mapping.is_active !== undefined ? mapping.is_active : true,
       sync_inventory: mapping.sync_inventory !== undefined ? mapping.sync_inventory : true,
@@ -2531,12 +2717,29 @@ if (updates.price !== undefined) {
     if (!this.data.channel_rate_mappings) this.data.channel_rate_mappings = [];
     const now = new Date().toISOString();
 
+    const channelId = mapping.channel_id || 'chan-booking-com';
+    const channelCode = mapping.channel_code || 'BOOKING_COM';
+    const otaRateId = (mapping.channel_rate_plan_id || '').trim();
+
+    // Prevent duplicate OTA rate plan mappings for the same channel
+    if (otaRateId) {
+      const duplicate = this.data.channel_rate_mappings.find(
+        m => m.id !== mapping.id &&
+             (m.channel_id === channelId || m.channel_code === channelCode) &&
+             m.channel_rate_plan_id.trim().toUpperCase() === otaRateId.toUpperCase()
+      );
+      if (duplicate) {
+        throw new Error(`Duplicate OTA Rate Plan ID: '${otaRateId}' is already mapped to ${duplicate.pms_rate_plan_name} for ${duplicate.channel_code}.`);
+      }
+    }
+
     if (mapping.id) {
       const idx = this.data.channel_rate_mappings.findIndex(m => m.id === mapping.id);
       if (idx !== -1) {
         const updated: ChannelRateMapping = {
           ...this.data.channel_rate_mappings[idx],
           ...mapping,
+          channel_rate_plan_id: otaRateId || this.data.channel_rate_mappings[idx].channel_rate_plan_id,
           updated_at: now
         } as ChannelRateMapping;
         this.data.channel_rate_mappings[idx] = updated;
@@ -2547,14 +2750,14 @@ if (updates.price !== undefined) {
 
     const newRateMapping: ChannelRateMapping = {
       id: `cra-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-      channel_id: mapping.channel_id || 'chan-booking-com',
-      channel_code: mapping.channel_code || 'BOOKING_COM',
+      channel_id: channelId,
+      channel_code: channelCode,
       property_code: mapping.property_code || 'sbm-hotel',
       pms_room_type_id: mapping.pms_room_type_id || 'room-sbm-deluxe',
       pms_rate_plan_id: mapping.pms_rate_plan_id || 'rate-sbm-deluxe-ep',
       pms_rate_plan_name: mapping.pms_rate_plan_name || 'Standard Room Only (EP)',
       channel_room_id: mapping.channel_room_id || 'OTA-DLX-01',
-      channel_rate_plan_id: mapping.channel_rate_plan_id || 'OTA-RATE-FLEX',
+      channel_rate_plan_id: otaRateId || 'OTA-RATE-FLEX',
       channel_rate_plan_name: mapping.channel_rate_plan_name || 'Standard Flexible Rate',
       price_multiplier: mapping.price_multiplier || 1.0,
       is_active: mapping.is_active !== undefined ? mapping.is_active : true,
@@ -2672,6 +2875,146 @@ if (updates.price !== undefined) {
     this.data.sync_jobs[idx] = updated;
     this.save();
     return updated;
+  }
+
+  // Atomic Job Claim: prevents two concurrent workers from executing the same sync job
+  public claimNextPendingSyncJob(workerId: string): SyncJob | null {
+    if (!this.data.sync_jobs) this.data.sync_jobs = [];
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+
+    const job = this.data.sync_jobs.find(j => {
+      if (j.status === 'PENDING') return true;
+      if (j.status === 'RETRYING') {
+        if (!j.next_retry_at) return true;
+        return new Date(j.next_retry_at).getTime() <= now;
+      }
+      return false;
+    });
+
+    if (!job) return null;
+
+    job.status = 'PROCESSING';
+    job.worker_id = workerId;
+    job.processing_started_at = nowIso;
+    job.last_attempt_at = nowIso;
+    this.save();
+    return { ...job };
+  }
+
+  // Claim multiple pending sync jobs atomically
+  public claimPendingSyncJobs(workerId: string, limit: number = 10): SyncJob[] {
+    if (!this.data.sync_jobs) this.data.sync_jobs = [];
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const claimed: SyncJob[] = [];
+
+    for (const job of this.data.sync_jobs) {
+      if (claimed.length >= limit) break;
+
+      let isEligible = false;
+      if (job.status === 'PENDING') {
+        isEligible = true;
+      } else if (job.status === 'RETRYING') {
+        if (!job.next_retry_at || new Date(job.next_retry_at).getTime() <= now) {
+          isEligible = true;
+        }
+      }
+
+      if (isEligible) {
+        job.status = 'PROCESSING';
+        job.worker_id = workerId;
+        job.processing_started_at = nowIso;
+        job.last_attempt_at = nowIso;
+        claimed.push({ ...job });
+      }
+    }
+
+    if (claimed.length > 0) {
+      this.save();
+    }
+    return claimed;
+  }
+
+  // Recover Stuck Jobs: resets jobs stranded in PROCESSING due to server crash/restart
+  public recoverStuckSyncJobs(stuckTimeoutMs: number = 5 * 60 * 1000): number {
+    if (!this.data.sync_jobs) return 0;
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    let recovered = 0;
+
+    for (const job of this.data.sync_jobs) {
+      if (job.status === 'PROCESSING') {
+        const startTime = job.processing_started_at ? new Date(job.processing_started_at).getTime() : 0;
+        if (now - startTime > stuckTimeoutMs) {
+          if (job.retry_count < job.max_retries) {
+            job.status = 'PENDING';
+            job.error_message = 'Recovered from stuck processing state after timeout / server restart.';
+            job.worker_id = undefined;
+            job.processing_started_at = undefined;
+          } else {
+            job.status = 'FAILED';
+            job.completed_at = nowIso;
+            job.error_message = 'Job timed out in processing state after exceeding maximum retries.';
+          }
+          recovered++;
+        }
+      }
+    }
+
+    if (recovered > 0) {
+      this.save();
+    }
+    return recovered;
+  }
+
+  // --- OUT-OF-ORDER OTA EXTERNAL EVENTS ---
+  public savePendingExternalEvent(event: Partial<PendingExternalEvent>): PendingExternalEvent {
+    if (!this.data.pending_external_events) this.data.pending_external_events = [];
+    const fullEvent: PendingExternalEvent = {
+      id: event.id || `evt-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+      channel: event.channel || 'OTHER',
+      external_booking_id: event.external_booking_id || '',
+      event_type: event.event_type || 'MODIFICATION',
+      payload: event.payload || {},
+      status: event.status || 'PENDING',
+      retry_count: event.retry_count || 0,
+      received_at: event.received_at || new Date().toISOString()
+    };
+    this.data.pending_external_events.push(fullEvent);
+    this.save();
+    return fullEvent;
+  }
+
+  public getPendingExternalEvent(channel: string, externalBookingId: string): PendingExternalEvent | undefined {
+    if (!this.data.pending_external_events) return undefined;
+    return this.data.pending_external_events.find(
+      e => e.channel.toUpperCase() === channel.toUpperCase() &&
+           e.external_booking_id.trim().toUpperCase() === externalBookingId.trim().toUpperCase() &&
+           e.status === 'PENDING'
+    );
+  }
+
+  public getPendingExternalEvents(channel?: string, externalBookingId?: string): PendingExternalEvent[] {
+    if (!this.data.pending_external_events) return [];
+    let list = this.data.pending_external_events.filter(e => e.status === 'PENDING');
+    if (channel) {
+      list = list.filter(e => e.channel.toUpperCase() === channel.toUpperCase());
+    }
+    if (externalBookingId) {
+      list = list.filter(e => e.external_booking_id.trim().toUpperCase() === externalBookingId.trim().toUpperCase());
+    }
+    return list;
+  }
+
+  public markPendingExternalEventProcessed(id: string): void {
+    if (!this.data.pending_external_events) return;
+    const item = this.data.pending_external_events.find(e => e.id === id);
+    if (item) {
+      item.status = 'PROCESSED';
+      item.processed_at = new Date().toISOString();
+      this.save();
+    }
   }
 
   // --- CENTRAL CHANNEL INVENTORY (READING DIRECTLY FROM PMS) ---
@@ -3182,6 +3525,72 @@ if (updates.price !== undefined) {
       return true;
     }
     return false;
+  }
+
+  // --- CHANNEL RESTRICTIONS ---
+  public getChannelRestrictions(propertyCode?: string, startDate?: string, endDate?: string): ChannelRestriction[] {
+    if (!this.data.channel_restrictions) this.data.channel_restrictions = [];
+    let list = [...this.data.channel_restrictions];
+    if (propertyCode && propertyCode !== 'all' && propertyCode !== 'both') {
+      list = list.filter(r => r.property_code === propertyCode);
+    }
+    if (startDate) {
+      list = list.filter(r => r.date >= startDate);
+    }
+    if (endDate) {
+      list = list.filter(r => r.date <= endDate);
+    }
+    return list;
+  }
+
+  public saveChannelRestriction(restriction: Partial<ChannelRestriction>): ChannelRestriction {
+    if (!this.data.channel_restrictions) this.data.channel_restrictions = [];
+    if (!restriction.property_code || !restriction.room_type_id || !restriction.date) {
+      throw new Error('Property code, room type ID, and date are required for restrictions.');
+    }
+
+    const channelCode = restriction.channel_code || 'ALL';
+    const ratePlanId = restriction.rate_plan_id || 'all';
+
+    const idx = this.data.channel_restrictions.findIndex(
+      r => r.property_code === restriction.property_code &&
+           r.room_type_id === restriction.room_type_id &&
+           (r.channel_code || 'ALL') === channelCode &&
+           (r.rate_plan_id || 'all') === ratePlanId &&
+           r.date === restriction.date
+    );
+
+    const updated: ChannelRestriction = {
+      id: idx >= 0 ? this.data.channel_restrictions[idx].id : `rest-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`,
+      property_code: restriction.property_code,
+      channel_code: channelCode,
+      room_type_id: restriction.room_type_id,
+      rate_plan_id: ratePlanId,
+      date: restriction.date,
+      stop_sell: restriction.stop_sell !== undefined ? Boolean(restriction.stop_sell) : false,
+      closed_to_arrival: restriction.closed_to_arrival !== undefined ? Boolean(restriction.closed_to_arrival) : false,
+      closed_to_departure: restriction.closed_to_departure !== undefined ? Boolean(restriction.closed_to_departure) : false,
+      min_stay: restriction.min_stay !== undefined ? Number(restriction.min_stay) : 1,
+      max_stay: restriction.max_stay !== undefined ? Number(restriction.max_stay) : 30,
+      updated_at: new Date().toISOString()
+    };
+
+    if (idx >= 0) {
+      this.data.channel_restrictions[idx] = updated;
+    } else {
+      this.data.channel_restrictions.push(updated);
+    }
+
+    this.save();
+    return updated;
+  }
+
+  public bulkUpdateRestrictions(restrictions: Partial<ChannelRestriction>[]): ChannelRestriction[] {
+    const results: ChannelRestriction[] = [];
+    for (const r of restrictions) {
+      results.push(this.saveChannelRestriction(r));
+    }
+    return results;
   }
 }
 

@@ -15,5 +15,9 @@ export const auditService = {
 
   getActivities(propertyCode?: string, limit: number = 50): FrontDeskActivity[] {
     return db.getActivities(propertyCode).slice(0, limit);
+  },
+
+  getLogs(propertyCode?: string, limit: number = 100): FrontDeskActivity[] {
+    return db.getActivities(propertyCode).slice(0, limit);
   }
 };

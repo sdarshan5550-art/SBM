@@ -156,6 +156,9 @@ CREATE INDEX IF NOT EXISTS idx_reservations_dates ON reservations(check_in, chec
 CREATE INDEX IF NOT EXISTS idx_reservations_status ON reservations(status);
 CREATE INDEX IF NOT EXISTS idx_reservations_booking_number ON reservations(booking_number);
 CREATE INDEX IF NOT EXISTS idx_reservations_phone ON reservations(guest_phone);
+CREATE INDEX IF NOT EXISTS idx_reservations_source_id ON reservations(source_booking_id);
+-- Unique constraint preventing duplicate OTA reservations
+CREATE UNIQUE INDEX IF NOT EXISTS idx_reservations_source_booking ON reservations(source, source_booking_id) WHERE source_booking_id IS NOT NULL;
 
 -- 7. RESERVATION ROOMS TABLE (Supports multi-room bookings and distinct room assignments)
 CREATE TABLE IF NOT EXISTS reservation_rooms (
@@ -322,51 +325,130 @@ CREATE TABLE IF NOT EXISTS managed_images (
 );
 
 -- ==========================================================
--- 18. FUTURE-READY CHANNEL MANAGER ARCHITECTURE (Disabled in Phase 1)
+-- 18. AUTHORITATIVE SBM CHANNEL MANAGER TABLES
 -- ==========================================================
 
-CREATE TABLE IF NOT EXISTS channel_connections (
+CREATE TABLE IF NOT EXISTS channel_configs (
     id VARCHAR(64) PRIMARY KEY,
-    property_id VARCHAR(64) REFERENCES properties(id) ON DELETE CASCADE,
-    channel VARCHAR(32) NOT NULL, -- 'MMT', 'GOIBIBO', 'BOOKING_COM', 'AGODA'
-    provider VARCHAR(64) DEFAULT 'Direct / NextGen CM',
-    external_property_id VARCHAR(128),
-    status VARCHAR(32) DEFAULT 'DISABLED', -- 'DISABLED', 'ACTIVE', 'SYNC_ERROR'
+    code VARCHAR(32) UNIQUE NOT NULL,
+    name VARCHAR(64) NOT NULL,
+    type VARCHAR(32) DEFAULT 'OTA',
+    enabled BOOLEAN DEFAULT FALSE,
+    connection_status VARCHAR(32) DEFAULT 'NOT_CONFIGURED',
+    property_code VARCHAR(32) DEFAULT 'both',
+    credentials_configured BOOLEAN DEFAULT FALSE,
+    settings JSONB DEFAULT '{}'::jsonb,
+    inventory_status VARCHAR(32) DEFAULT 'PENDING',
+    rates_status VARCHAR(32) DEFAULT 'PENDING',
+    reservations_status VARCHAR(32) DEFAULT 'PENDING',
     last_sync_at TIMESTAMP WITH TIME ZONE,
+    last_successful_sync_at TIMESTAMP WITH TIME ZONE,
+    last_error TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS channel_room_mappings (
     id VARCHAR(64) PRIMARY KEY,
-    channel_connection_id VARCHAR(64) REFERENCES channel_connections(id) ON DELETE CASCADE,
-    local_room_type_id VARCHAR(64) REFERENCES room_types(id) ON DELETE CASCADE,
-    external_room_type_id VARCHAR(128) NOT NULL,
-    external_room_name VARCHAR(128),
-    status VARCHAR(32) DEFAULT 'ACTIVE'
+    channel_id VARCHAR(64) REFERENCES channel_configs(id) ON DELETE CASCADE,
+    channel_code VARCHAR(32) NOT NULL,
+    property_code VARCHAR(32) NOT NULL,
+    pms_room_type_id VARCHAR(64) REFERENCES room_types(id) ON DELETE RESTRICT,
+    pms_room_type_name VARCHAR(128) NOT NULL,
+    channel_room_id VARCHAR(128) NOT NULL,
+    channel_room_name VARCHAR(128) NOT NULL,
+    is_active BOOLEAN DEFAULT TRUE,
+    sync_inventory BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_channel_room_mapping UNIQUE (channel_id, channel_room_id)
 );
 
 CREATE TABLE IF NOT EXISTS channel_rate_mappings (
     id VARCHAR(64) PRIMARY KEY,
-    channel_connection_id VARCHAR(64) REFERENCES channel_connections(id) ON DELETE CASCADE,
-    local_rate_plan_id VARCHAR(64) REFERENCES rate_plans(id) ON DELETE CASCADE,
-    external_rate_plan_id VARCHAR(128) NOT NULL,
-    status VARCHAR(32) DEFAULT 'ACTIVE'
+    channel_id VARCHAR(64) REFERENCES channel_configs(id) ON DELETE CASCADE,
+    channel_code VARCHAR(32) NOT NULL,
+    property_code VARCHAR(32) NOT NULL,
+    pms_room_type_id VARCHAR(64) REFERENCES room_types(id) ON DELETE RESTRICT,
+    pms_rate_plan_id VARCHAR(64) REFERENCES rate_plans(id) ON DELETE RESTRICT,
+    pms_rate_plan_name VARCHAR(128) NOT NULL,
+    channel_room_id VARCHAR(128) NOT NULL,
+    channel_rate_plan_id VARCHAR(128) NOT NULL,
+    channel_rate_plan_name VARCHAR(128) NOT NULL,
+    price_multiplier NUMERIC(5, 2) DEFAULT 1.00,
+    tax_mode VARCHAR(32) DEFAULT 'INCLUSIVE',
+    meal_plan VARCHAR(32) DEFAULT 'EP',
+    cancellation_policy VARCHAR(64) DEFAULT 'MODERATE',
+    is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_channel_rate_mapping UNIQUE (channel_id, channel_rate_plan_id)
 );
 
-CREATE TABLE IF NOT EXISTS channel_sync_events (
+CREATE TABLE IF NOT EXISTS channel_restrictions (
+    id VARCHAR(64) PRIMARY KEY,
+    property_code VARCHAR(32) NOT NULL,
+    channel_code VARCHAR(32) DEFAULT 'ALL', -- 'ALL', 'DIRECT', 'BOOKING_COM', 'MMT', etc.
+    room_type_id VARCHAR(64) REFERENCES room_types(id) ON DELETE CASCADE,
+    rate_plan_id VARCHAR(64),
+    date DATE NOT NULL,
+    stop_sell BOOLEAN DEFAULT FALSE,
+    closed_to_arrival BOOLEAN DEFAULT FALSE,
+    closed_to_departure BOOLEAN DEFAULT FALSE,
+    min_stay INT DEFAULT 1,
+    max_stay INT DEFAULT 30,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_channel_restriction UNIQUE (property_code, channel_code, room_type_id, date)
+);
+
+CREATE INDEX IF NOT EXISTS idx_restrictions_lookup ON channel_restrictions(property_code, channel_code, room_type_id, date);
+CREATE INDEX IF NOT EXISTS idx_restrictions_date_range ON channel_restrictions(date, property_code);
+
+CREATE TABLE IF NOT EXISTS channel_pending_events (
     id VARCHAR(64) PRIMARY KEY,
     channel VARCHAR(32) NOT NULL,
-    event_type VARCHAR(64) NOT NULL, -- 'INVENTORY_UPDATE', 'RATE_UPDATE', 'BOOKING_PULL', 'BOOKING_ACK'
-    direction VARCHAR(16) NOT NULL,   -- 'INBOUND', 'OUTBOUND'
-    reservation_id VARCHAR(64),
-    room_type_id VARCHAR(64),
-    status VARCHAR(32) DEFAULT 'PENDING',
-    attempts INT DEFAULT 0,
-    error_message TEXT,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    processed_at TIMESTAMP WITH TIME ZONE
+    external_booking_id VARCHAR(128) NOT NULL,
+    event_type VARCHAR(64) NOT NULL, -- 'CANCELLATION', 'MODIFICATION'
+    payload JSONB NOT NULL,
+    status VARCHAR(32) DEFAULT 'PENDING', -- 'PENDING', 'PROCESSED', 'EXPIRED'
+    retry_count INT DEFAULT 0,
+    received_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP WITH TIME ZONE,
+    CONSTRAINT uq_pending_event UNIQUE (channel, external_booking_id, event_type)
 );
+
+CREATE INDEX IF NOT EXISTS idx_pending_events_lookup ON channel_pending_events(channel, external_booking_id, status);
+
+CREATE TABLE IF NOT EXISTS channel_sync_jobs (
+    id VARCHAR(64) PRIMARY KEY,
+    channel_id VARCHAR(64),
+    channel_code VARCHAR(32) NOT NULL,
+    channel_name VARCHAR(64) NOT NULL,
+    property_code VARCHAR(32) NOT NULL,
+    room_type_id VARCHAR(64),
+    room_name VARCHAR(128),
+    operation VARCHAR(64) NOT NULL,
+    date_start DATE NOT NULL,
+    date_end DATE NOT NULL,
+    payload JSONB,
+    status VARCHAR(32) DEFAULT 'PENDING', -- 'PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'RETRYING'
+    retry_count INT DEFAULT 0,
+    max_retries INT DEFAULT 3,
+    worker_id VARCHAR(128),
+    processing_started_at TIMESTAMP WITH TIME ZONE,
+    last_attempt_at TIMESTAMP WITH TIME ZONE,
+    completed_at TIMESTAMP WITH TIME ZONE,
+    error_message TEXT,
+    duration_ms INT,
+    external_reference VARCHAR(128),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_status ON channel_sync_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_worker ON channel_sync_jobs(worker_id, status);
+CREATE INDEX IF NOT EXISTS idx_sync_jobs_channel_op ON channel_sync_jobs(channel_code, operation, date_start, date_end);
 
 -- ==========================================================
 -- 19. ABOUT PAGE IMAGES TABLE (Admin Dedicated About Page Images)

@@ -23,7 +23,8 @@ import {
   SyncJob,
   NormalizedOTAReservation,
   ChannelInventorySummary,
-  AboutPageImage
+  AboutPageImage,
+  ChannelRestriction
 } from '../types';
 
 const ADMIN_TOKEN_KEY = 'sbm_admin_token';
@@ -560,14 +561,65 @@ export const api = {
       request<{ success: boolean; message: string; details?: any }>(`/api/admin/channels/${id}/test`, {
         method: 'POST'
       }),
+    validateChannel: (id: string) =>
+      request<{ valid: boolean; errors: string[]; warnings: string[]; channelName: string; channelCode: string }>(`/api/admin/channels/${id}/validate`, {
+        method: 'POST'
+      }),
+    activateChannel: (id: string) =>
+      request<{ success: boolean; channel: ChannelConfig; message: string; validation: any }>(`/api/admin/channels/${id}/activate`, {
+        method: 'POST'
+      }),
+    disableChannel: (id: string) =>
+      request<{ success: boolean; channel: ChannelConfig; message: string }>(`/api/admin/channels/${id}/disable`, {
+        method: 'POST'
+      }),
+    getHealth: () =>
+      request<any[]>('/api/admin/channels/health'),
     syncChannel: (id: string) =>
       request<{ success: boolean; message: string; jobsQueued: number }>(`/api/admin/channels/${id}/sync`, {
         method: 'POST'
+      }),
+    manualScopedSync: (params: { channelId?: string; scope: 'ALL' | 'INVENTORY' | 'RATES' | 'RESTRICTIONS' | 'RESERVATIONS'; allActive?: boolean }) =>
+      request<{ success: boolean; message: string; jobsQueued: number }>('/api/admin/channels/manual-sync', {
+        method: 'POST',
+        body: JSON.stringify(params)
       }),
     syncAllChannels: () =>
       request<{ success: boolean; message: string; totalChannels: number; activeChannels: number; jobsQueued: number }>('/api/admin/channels/sync-all', {
         method: 'POST'
       }),
+    getRates: (params?: { propertyCode?: string; startDate?: string; endDate?: string; roomTypeId?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.propertyCode) q.set('propertyCode', params.propertyCode);
+      if (params?.startDate) q.set('startDate', params.startDate);
+      if (params?.endDate) q.set('endDate', params.endDate);
+      if (params?.roomTypeId) q.set('roomTypeId', params.roomTypeId);
+      return request<any[]>(`/api/admin/channels/rates?${q.toString()}`);
+    },
+    updateManualRates: (data: { propertyCode: string; roomTypeId: string; ratePlanId?: string; startDate: string; endDate: string; basePrice: number; priceMultiplier?: number; notes?: string }) =>
+      request<{ success: boolean; message: string; jobsQueued: number }>('/api/admin/channels/rates/manual-update', {
+        method: 'POST',
+        body: JSON.stringify(data)
+      }),
+    getReservations: (params?: { propertyCode?: string; source?: string; status?: string; search?: string; startDate?: string; endDate?: string; page?: number; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.propertyCode) q.set('propertyCode', params.propertyCode);
+      if (params?.source) q.set('source', params.source);
+      if (params?.status) q.set('status', params.status);
+      if (params?.search) q.set('search', params.search);
+      if (params?.startDate) q.set('startDate', params.startDate);
+      if (params?.endDate) q.set('endDate', params.endDate);
+      if (params?.page) q.set('page', params.page.toString());
+      if (params?.limit) q.set('limit', params.limit.toString());
+      return request<{ reservations: any[]; total: number; page: number; limit: number; totalPages: number }>(`/api/admin/channels/reservations?${q.toString()}`);
+    },
+    getAuditLogs: (params?: { channelCode?: string; action?: string; limit?: number }) => {
+      const q = new URLSearchParams();
+      if (params?.channelCode) q.set('channelCode', params.channelCode);
+      if (params?.action) q.set('action', params.action);
+      if (params?.limit) q.set('limit', params.limit.toString());
+      return request<any[]>(`/api/admin/channels/audit-logs?${q.toString()}`);
+    },
     getInventory: (params?: { propertyCode?: string; startDate?: string; endDate?: string }) => {
       const q = new URLSearchParams();
       if (params?.propertyCode) q.set('propertyCode', params.propertyCode);
@@ -647,6 +699,23 @@ export const api = {
       request<{ success: boolean; isExisting: boolean; booking: any; message: string }>('/api/admin/channels/ota/import', {
         method: 'POST',
         body: JSON.stringify(data)
+      }),
+    getRestrictions: (params?: { propertyCode?: string; startDate?: string; endDate?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.propertyCode) q.set('propertyCode', params.propertyCode);
+      if (params?.startDate) q.set('startDate', params.startDate);
+      if (params?.endDate) q.set('endDate', params.endDate);
+      return request<ChannelRestriction[]>(`/api/admin/channels/restrictions?${q.toString()}`);
+    },
+    saveRestriction: (restriction: Partial<ChannelRestriction>) =>
+      request<ChannelRestriction>('/api/admin/channels/restrictions', {
+        method: 'POST',
+        body: JSON.stringify(restriction)
+      }),
+    bulkUpdateRestrictions: (restrictions: Partial<ChannelRestriction>[]) =>
+      request<ChannelRestriction[]>('/api/admin/channels/restrictions/bulk', {
+        method: 'POST',
+        body: JSON.stringify(restrictions)
       })
   },
 

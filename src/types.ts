@@ -37,10 +37,13 @@ export interface FrontDeskActivity {
   id: string;
   timestamp: string; // e.g. "10:42 AM"
   date: string; // YYYY-MM-DD
-  action: 'Check-in' | 'Check-out' | 'Booking' | 'Maintenance' | 'Status Update' | 'Payment';
+  action: 'Check-in' | 'Check-out' | 'Booking' | 'Maintenance' | 'Status Update' | 'Payment' | string;
   description: string;
   property_code?: PropertyCode;
+  propertyCode?: PropertyCode;
   performed_by?: string;
+  performedBy?: string;
+  reservationId?: string;
 }
 
 export type KnowledgeCategory =
@@ -97,6 +100,7 @@ export type BookingStatus = 'Pending' | 'Confirmed' | 'Checked In' | 'Checked Ou
 export type PaymentStatus = 'Pending' | 'Completed' | 'Paid' | 'Partial' | 'Failed' | 'Refunded';
 
 export type BookingSource =
+  | 'DIRECT'
   | 'WEBSITE'
   | 'WALK_IN'
   | 'PHONE'
@@ -106,6 +110,9 @@ export type BookingSource =
   | 'GOIBIBO'
   | 'BOOKING_COM'
   | 'AGODA'
+  | 'EXPEDIA'
+  | 'CTRIP'
+  | 'CLEARTRIP'
   | 'OTHER';
 
 export type PMSOperationalStatus = 'AVAILABLE' | 'OUT_OF_ORDER' | 'BLOCKED';
@@ -529,25 +536,36 @@ export type ChannelCode =
   | 'GOIBIBO'
   | 'AGODA'
   | 'EXPEDIA'
+  | 'CTRIP'
+  | 'CLEARTRIP'
   | 'OTHER';
 
 export type ChannelType = 'DIRECT' | 'OTA' | 'GDS' | 'METASEARCH';
 
 export type ChannelConnectionStatus =
-  | 'CONNECTED'
   | 'NOT_CONFIGURED'
-  | 'DISCONNECTED'
+  | 'CONFIGURED'
+  | 'TESTING'
+  | 'CONNECTED'
+  | 'SYNCING'
   | 'ERROR'
-  | 'SYNCING';
+  | 'DISABLED'
+  | 'DISCONNECTED';
 
-export type SyncJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type SyncJobStatus = 'PENDING' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'RETRYING';
 
 export type SyncOperation =
   | 'AVAILABILITY_UPDATE'
+  | 'INVENTORY_UPDATE'
   | 'RATE_UPDATE'
   | 'RESTRICTION_UPDATE'
   | 'FULL_SYNC'
-  | 'RESERVATION_IMPORT';
+  | 'RESERVATION_IMPORT'
+  | 'BOOKING_PULL'
+  | 'BOOKING_CREATE'
+  | 'BOOKING_MODIFY'
+  | 'BOOKING_CANCEL'
+  | 'BOOKING_ACK';
 
 export interface ChannelConfig {
   id: string;
@@ -564,7 +582,14 @@ export interface ChannelConfig {
     priceMultiplier?: number;
     webhookEnabled?: boolean;
     accountReference?: string;
+    propertyId?: string;
+    apiKeyMasked?: string;
+    webhookSecretMasked?: string;
+    endpointUrl?: string;
   };
+  inventoryStatus?: 'SYNCED' | 'ERROR' | 'PENDING';
+  ratesStatus?: 'SYNCED' | 'ERROR' | 'PENDING';
+  reservationsStatus?: 'SYNCED' | 'ERROR' | 'PENDING';
   lastSyncAt?: string;
   lastSuccessfulSyncAt?: string;
   lastError?: string;
@@ -572,6 +597,22 @@ export interface ChannelConfig {
   updatedAt: string;
   mappedRoomsCount: number;
   mappedRatePlansCount: number;
+}
+
+export interface ChannelRestriction {
+  id: string;
+  property_code: PropertyCode;
+  channel_code?: ChannelCode | 'ALL';
+  room_type_id: string;
+  rate_plan_id?: string;
+  date: string; // YYYY-MM-DD
+  stop_sell?: boolean;
+  closed_to_arrival?: boolean;
+  closed_to_departure?: boolean;
+  min_stay?: number;
+  max_stay?: number;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ChannelRoomMapping {
@@ -642,6 +683,9 @@ export interface SyncJob {
   error_message?: string;
   duration_ms?: number;
   external_reference?: string;
+  worker_id?: string;
+  processing_started_at?: string;
+  next_retry_at?: string;
   created_at: string;
   completed_at?: string;
 }
@@ -682,5 +726,17 @@ export interface ChannelInventorySummary {
   blocked_count: number;
   out_of_order_count: number;
   available_count: number;
+}
+
+export interface PendingExternalEvent {
+  id: string;
+  channel: BookingSource;
+  external_booking_id: string;
+  event_type: 'CANCELLATION' | 'MODIFICATION';
+  payload: any;
+  status: 'PENDING' | 'PROCESSED' | 'EXPIRED';
+  retry_count?: number;
+  received_at: string;
+  processed_at?: string;
 }
 
