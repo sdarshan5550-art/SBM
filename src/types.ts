@@ -418,6 +418,20 @@ export interface Inquiry {
   created_at: string;
 }
 
+export interface SocialMediaLinkConfig {
+  platform: 'instagram' | 'facebook';
+  enabled: boolean;
+  url: string;
+  show_in_header: boolean;
+  show_on_contact: boolean;
+  show_in_footer: boolean;
+}
+
+export interface SocialMediaSettings {
+  instagram: SocialMediaLinkConfig;
+  facebook: SocialMediaLinkConfig;
+}
+
 export interface HotelSettings {
   hotel_name: string;
   gst_percent: number;
@@ -426,6 +440,7 @@ export interface HotelSettings {
   payment_gateway_mode: 'test' | 'live';
   razorpay_key_id: string;
   currency: string;
+  social_media?: SocialMediaSettings;
 }
 
 export interface AvailabilitySearchQuery {

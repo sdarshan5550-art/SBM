@@ -1455,6 +1455,72 @@ async function runTests() {
   }
 
   // --------------------------------------------------------------------------
+  // TEST 45: Social Media Links Settings & Location Scope
+  // --------------------------------------------------------------------------
+  try {
+    const initialSettings = db.getSettings();
+    assert(Boolean(initialSettings.social_media), 'Social media settings object must be initialized');
+    assert(Boolean(initialSettings.social_media?.instagram), 'Instagram configuration must exist');
+    assert(Boolean(initialSettings.social_media?.facebook), 'Facebook configuration must exist');
+
+    // Update settings: Instagram enabled on header only, Facebook disabled
+    const updated = db.updateSettings({
+      social_media: {
+        instagram: {
+          platform: 'instagram',
+          enabled: true,
+          url: 'https://www.instagram.com/sbmhotel_test',
+          show_in_header: true,
+          show_on_contact: false,
+          show_in_footer: true
+        },
+        facebook: {
+          platform: 'facebook',
+          enabled: false,
+          url: 'https://www.facebook.com/sbmhotel_test',
+          show_in_header: false,
+          show_on_contact: false,
+          show_in_footer: false
+        }
+      }
+    });
+
+    assert(updated.social_media?.instagram.enabled === true, 'Instagram must be enabled');
+    assert(updated.social_media?.instagram.show_in_header === true, 'Instagram must be shown in header');
+    assert(updated.social_media?.instagram.show_on_contact === false, 'Instagram must be hidden on contact');
+    assert(updated.social_media?.instagram.show_in_footer === true, 'Instagram must be shown in footer');
+    assert(updated.social_media?.facebook.enabled === false, 'Facebook must be disabled');
+    assert(updated.social_media?.facebook.show_in_footer === false, 'Facebook footer visibility must be false');
+    assert(updated.social_media?.instagram.url === 'https://www.instagram.com/sbmhotel_test', 'Instagram URL must persist');
+
+    // Restore enabled defaults
+    db.updateSettings({
+      social_media: {
+        instagram: {
+          platform: 'instagram',
+          enabled: true,
+          url: 'https://www.instagram.com/sbmhotel',
+          show_in_header: true,
+          show_on_contact: true,
+          show_in_footer: true
+        },
+        facebook: {
+          platform: 'facebook',
+          enabled: true,
+          url: 'https://www.facebook.com/sbmhotel',
+          show_in_header: true,
+          show_on_contact: true,
+          show_in_footer: true
+        }
+      }
+    });
+
+    results.push({ name: 'TEST 45: Social Media settings persist with platform and location scopes', passed: true });
+  } catch (err: any) {
+    results.push({ name: 'TEST 45: Social Media settings persist with platform and location scopes', passed: false, error: err.message });
+  }
+
+  // --------------------------------------------------------------------------
   // Summary
   // --------------------------------------------------------------------------
   console.log('\n--- TEST SUITE RESULTS ---');

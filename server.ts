@@ -9,7 +9,12 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 import { db } from './server/db';
 import { AvailabilitySearchQuery } from './src/types';
-import { initializePostgres } from './server/db/postgres';
+import {
+  initializePostgres,
+  isPostgresAvailable,
+  postgresGetSocialMediaSettings,
+  postgresUpdateSocialMediaSettings
+} from './server/db/postgres';
 import { reservationService } from './server/services/reservationService';
 import { inventoryService } from './server/services/inventoryService';
 import { paymentService } from './server/services/paymentService';
@@ -633,9 +638,17 @@ async function startServer() {
   });
 
   // Public Settings
-  app.get('/api/settings', (req, res) => {
+  app.get('/api/settings', async (req, res) => {
     try {
       const settings = db.getSettings();
+      if (isPostgresAvailable()) {
+        try {
+          const pgSocial = await postgresGetSocialMediaSettings();
+          settings.social_media = pgSocial;
+        } catch (e) {
+          // fallback to db.getSettings().social_media
+        }
+      }
       res.json(settings);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -1098,18 +1111,34 @@ res.json({
   });
 
   // Admin Settings
-  app.get('/api/admin/settings', authenticateAdmin, (req, res) => {
+  app.get('/api/admin/settings', authenticateAdmin, async (req, res) => {
     try {
       const settings = db.getSettings();
+      if (isPostgresAvailable()) {
+        try {
+          const pgSocial = await postgresGetSocialMediaSettings();
+          settings.social_media = pgSocial;
+        } catch (e) {
+          // fallback to db.getSettings().social_media
+        }
+      }
       res.json(settings);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.put('/api/admin/settings', authenticateAdmin, (req, res) => {
+  app.put('/api/admin/settings', authenticateAdmin, async (req, res) => {
     try {
       const updated = db.updateSettings(req.body);
+      if (isPostgresAvailable() && req.body.social_media) {
+        try {
+          const pgSocial = await postgresUpdateSocialMediaSettings(req.body.social_media);
+          updated.social_media = pgSocial;
+        } catch (e) {
+          console.error('[Settings] Error saving social media to PostgreSQL:', e);
+        }
+      }
       res.json(updated);
     } catch (err: any) {
       res.status(400).json({ error: err.message });

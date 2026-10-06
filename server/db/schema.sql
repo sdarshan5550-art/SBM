@@ -296,6 +296,20 @@ CREATE TABLE IF NOT EXISTS settings (
     payment_gateway_mode VARCHAR(16) DEFAULT 'test',
     razorpay_key_id VARCHAR(128),
     currency VARCHAR(8) DEFAULT 'INR',
+    social_media JSONB DEFAULT '{"instagram":{"platform":"instagram","enabled":true,"url":"https://www.instagram.com/sbmhotel","show_in_header":true,"show_on_contact":true,"show_in_footer":true},"facebook":{"platform":"facebook","enabled":true,"url":"https://www.facebook.com/sbmhotel","show_in_header":true,"show_on_contact":true,"show_in_footer":true}}'::jsonb,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 15B. SOCIAL MEDIA SETTINGS TABLE (Normalized relational store)
+CREATE TABLE IF NOT EXISTS social_media_settings (
+    id VARCHAR(64) PRIMARY KEY,
+    platform VARCHAR(32) UNIQUE NOT NULL,
+    enabled BOOLEAN DEFAULT TRUE,
+    url TEXT NOT NULL,
+    show_in_header BOOLEAN DEFAULT TRUE,
+    show_on_contact BOOLEAN DEFAULT TRUE,
+    show_in_footer BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 

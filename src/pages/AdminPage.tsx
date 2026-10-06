@@ -27,7 +27,11 @@ import {
   BarChart3,
   TrendingUp,
   Table,
-  Globe
+  Globe,
+  Instagram,
+  Facebook,
+  ExternalLink,
+  RotateCcw
 } from 'lucide-react';
 import { api, getAdminToken, setAdminToken, clearAdminToken } from '../lib/api';
 import { Booking, Property, RoomType, BlockedRoom, Inquiry, HotelSettings } from '../types';
@@ -109,6 +113,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
 
   // Settings
   const [settings, setSettings] = useState<HotelSettings | null>(null);
+  const [initialSocialSettings, setInitialSocialSettings] = useState<any>(null);
+  const [savingSocialMedia, setSavingSocialMedia] = useState(false);
+  const [socialMediaSuccessMsg, setSocialMediaSuccessMsg] = useState<string | null>(null);
 
   // Email Notification Diagnostics & Test
   const [emailStatus, setEmailStatus] = useState<{
@@ -172,7 +179,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     api.getRoomTypes().then(setRoomTypes).catch(console.error);
     api.getBlockedRooms().then(setBlockedRooms).catch(console.error);
     api.getAdminInquiries().then(setInquiries).catch(console.error);
-    api.getAdminSettings().then(setSettings).catch(console.error);
+    api.getAdminSettings().then((s) => {
+      setSettings(s);
+      if (s?.social_media) {
+        setInitialSocialSettings(JSON.parse(JSON.stringify(s.social_media)));
+      }
+    }).catch(console.error);
     api.email.getStatus().then(setEmailStatus).catch(console.error);
   };
 
@@ -1259,6 +1271,449 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
             >
               Save Configuration
             </button>
+          </div>
+
+          {/* Social Media Links Management Section */}
+          <div className="border-t border-stone-200 pt-5 mt-6 space-y-5">
+            <div>
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full bg-[#1A1A1A] flex items-center justify-center text-[#C5A059]">
+                  <Globe className="w-3.5 h-3.5" />
+                </div>
+                <h4 className="font-serif font-bold text-stone-800 text-sm">
+                  Website Settings &mdash; Social Media Links
+                </h4>
+              </div>
+              <p className="text-xs text-stone-500 mt-1">
+                Configure your official social media URLs and choose where the icons appear (Header, Contact Us page).
+              </p>
+            </div>
+
+            {socialMediaSuccessMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 text-xs rounded-xs flex items-center justify-between">
+                <span>{socialMediaSuccessMsg}</span>
+                <button
+                  type="button"
+                  onClick={() => setSocialMediaSuccessMsg(null)}
+                  className="text-emerald-700 hover:text-emerald-900 font-bold ml-2 text-xs"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+
+            {/* INSTAGRAM CONFIGURATION CARD */}
+            <div className="bg-[#FDFCFB] border border-stone-200 p-4 space-y-3.5 rounded-xs">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 text-white flex items-center justify-center shadow-2xs">
+                    <Instagram className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-serif font-bold text-sm text-[#1A1A1A]">Instagram</span>
+                    <span className="text-[10px] text-stone-500 block">Visual stories & updates</span>
+                  </div>
+                </div>
+
+                {/* Enable / Disable Switch */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-stone-600">
+                    {settings.social_media?.instagram?.enabled ? (
+                      <span className="text-emerald-700 font-bold">ON</span>
+                    ) : (
+                      <span className="text-stone-400">OFF</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = settings.social_media || {
+                        instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true },
+                        facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true }
+                      };
+                      setSettings({
+                        ...settings,
+                        social_media: {
+                          ...cur,
+                          instagram: {
+                            ...cur.instagram,
+                            enabled: !cur.instagram.enabled
+                          }
+                        }
+                      });
+                    }}
+                    className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      settings.social_media?.instagram?.enabled ? 'bg-emerald-600' : 'bg-stone-300'
+                    }`}
+                    role="switch"
+                    aria-checked={settings.social_media?.instagram?.enabled ?? true}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        settings.social_media?.instagram?.enabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Instagram URL */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  Instagram URL:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={settings.social_media?.instagram?.url ?? ''}
+                    onChange={(e) => {
+                      const cur = settings.social_media || {
+                        instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true },
+                        facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true }
+                      };
+                      setSettings({
+                        ...settings,
+                        social_media: {
+                          ...cur,
+                          instagram: {
+                            ...cur.instagram,
+                            url: e.target.value
+                          }
+                        }
+                      });
+                    }}
+                    placeholder="https://www.instagram.com/sbmhotel"
+                    className="flex-1 bg-white border border-stone-200 px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  {settings.social_media?.instagram?.url && (
+                    <a
+                      href={settings.social_media.instagram.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 hover:text-[#C5A059] text-xs flex items-center gap-1 transition"
+                      title="Open link in new tab to test"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Test</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Instagram Display Location Checkboxes */}
+              <div>
+                <span className="block text-xs font-semibold text-stone-700 mb-1.5">
+                  Display Location:
+                </span>
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.social_media?.instagram?.show_in_header ?? true}
+                      onChange={(e) => {
+                        const cur = settings.social_media || {
+                          instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true },
+                          facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true }
+                        };
+                        setSettings({
+                          ...settings,
+                          social_media: {
+                            ...cur,
+                            instagram: {
+                              ...cur.instagram,
+                              show_in_header: e.target.checked
+                            }
+                          }
+                        });
+                      }}
+                      className="rounded border-stone-300 text-[#C5A059] focus:ring-[#C5A059] w-4 h-4 cursor-pointer"
+                    />
+                    <span>Header</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.social_media?.instagram?.show_on_contact ?? true}
+                      onChange={(e) => {
+                        const cur = settings.social_media || {
+                          instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true },
+                          facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true }
+                        };
+                        setSettings({
+                          ...settings,
+                          social_media: {
+                            ...cur,
+                            instagram: {
+                              ...cur.instagram,
+                              show_on_contact: e.target.checked
+                            }
+                          }
+                        });
+                      }}
+                      className="rounded border-stone-300 text-[#C5A059] focus:ring-[#C5A059] w-4 h-4 cursor-pointer"
+                    />
+                    <span>Contact Us</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.social_media?.instagram?.show_in_footer ?? true}
+                      onChange={(e) => {
+                        const cur = settings.social_media || {
+                          instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true },
+                          facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true }
+                        };
+                        setSettings({
+                          ...settings,
+                          social_media: {
+                            ...cur,
+                            instagram: {
+                              ...cur.instagram,
+                              show_in_footer: e.target.checked
+                            }
+                          }
+                        });
+                      }}
+                      className="rounded border-stone-300 text-[#C5A059] focus:ring-[#C5A059] w-4 h-4 cursor-pointer"
+                    />
+                    <span>Footer</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* FACEBOOK CONFIGURATION CARD */}
+            <div className="bg-[#FDFCFB] border border-stone-200 p-4 space-y-3.5 rounded-xs">
+              <div className="flex items-center justify-between border-b border-stone-100 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-full bg-[#1877F2] text-white flex items-center justify-center shadow-2xs">
+                    <Facebook className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-serif font-bold text-sm text-[#1A1A1A]">Facebook</span>
+                    <span className="text-[10px] text-stone-500 block">Community & guest reviews</span>
+                  </div>
+                </div>
+
+                {/* Enable / Disable Switch */}
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-stone-600">
+                    {settings.social_media?.facebook?.enabled ? (
+                      <span className="text-emerald-700 font-bold">ON</span>
+                    ) : (
+                      <span className="text-stone-400">OFF</span>
+                    )}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const cur = settings.social_media || {
+                        instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true },
+                        facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true }
+                      };
+                      setSettings({
+                        ...settings,
+                        social_media: {
+                          ...cur,
+                          facebook: {
+                            ...cur.facebook,
+                            enabled: !cur.facebook.enabled
+                          }
+                        }
+                      });
+                    }}
+                    className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      settings.social_media?.facebook?.enabled ? 'bg-emerald-600' : 'bg-stone-300'
+                    }`}
+                    role="switch"
+                    aria-checked={settings.social_media?.facebook?.enabled ?? true}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        settings.social_media?.facebook?.enabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+              {/* Facebook URL */}
+              <div>
+                <label className="block text-xs font-semibold text-stone-700 mb-1">
+                  Facebook URL:
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    value={settings.social_media?.facebook?.url ?? ''}
+                    onChange={(e) => {
+                      const cur = settings.social_media || {
+                        instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true },
+                        facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true }
+                      };
+                      setSettings({
+                        ...settings,
+                        social_media: {
+                          ...cur,
+                          facebook: {
+                            ...cur.facebook,
+                            url: e.target.value
+                          }
+                        }
+                      });
+                    }}
+                    placeholder="https://www.facebook.com/sbmhotel"
+                    className="flex-1 bg-white border border-stone-200 px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  {settings.social_media?.facebook?.url && (
+                    <a
+                      href={settings.social_media.facebook.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-2 border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 hover:text-[#C5A059] text-xs flex items-center gap-1 transition"
+                      title="Open link in new tab to test"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Test</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+
+              {/* Facebook Display Location Checkboxes */}
+              <div>
+                <span className="block text-xs font-semibold text-stone-700 mb-1.5">
+                  Display Location:
+                </span>
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.social_media?.facebook?.show_in_header ?? true}
+                      onChange={(e) => {
+                        const cur = settings.social_media || {
+                          instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true },
+                          facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true }
+                        };
+                        setSettings({
+                          ...settings,
+                          social_media: {
+                            ...cur,
+                            facebook: {
+                              ...cur.facebook,
+                              show_in_header: e.target.checked
+                            }
+                          }
+                        });
+                      }}
+                      className="rounded border-stone-300 text-[#C5A059] focus:ring-[#C5A059] w-4 h-4 cursor-pointer"
+                    />
+                    <span>Header</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.social_media?.facebook?.show_on_contact ?? true}
+                      onChange={(e) => {
+                        const cur = settings.social_media || {
+                          instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true },
+                          facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true }
+                        };
+                        setSettings({
+                          ...settings,
+                          social_media: {
+                            ...cur,
+                            facebook: {
+                              ...cur.facebook,
+                              show_on_contact: e.target.checked
+                            }
+                          }
+                        });
+                      }}
+                      className="rounded border-stone-300 text-[#C5A059] focus:ring-[#C5A059] w-4 h-4 cursor-pointer"
+                    />
+                    <span>Contact Us</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs text-stone-700">
+                    <input
+                      type="checkbox"
+                      checked={settings.social_media?.facebook?.show_in_footer ?? true}
+                      onChange={(e) => {
+                        const cur = settings.social_media || {
+                          instagram: { platform: 'instagram', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true },
+                          facebook: { platform: 'facebook', enabled: true, url: '', show_in_header: true, show_on_contact: true, show_in_footer: true }
+                        };
+                        setSettings({
+                          ...settings,
+                          social_media: {
+                            ...cur,
+                            facebook: {
+                              ...cur.facebook,
+                              show_in_footer: e.target.checked
+                            }
+                          }
+                        });
+                      }}
+                      className="rounded border-stone-300 text-[#C5A059] focus:ring-[#C5A059] w-4 h-4 cursor-pointer"
+                    />
+                    <span>Footer</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* ACTION BUTTONS: SAVE & RESET */}
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                disabled={savingSocialMedia}
+                onClick={async () => {
+                  setSavingSocialMedia(true);
+                  setSocialMediaSuccessMsg(null);
+                  try {
+                    const res = await api.updateAdminSettings(settings);
+                    setSettings(res);
+                    if (res.social_media) {
+                      setInitialSocialSettings(JSON.parse(JSON.stringify(res.social_media)));
+                    }
+                    setSocialMediaSuccessMsg('✓ Social media links updated successfully! Changes are live on the website.');
+                    setTimeout(() => setSocialMediaSuccessMsg(null), 5000);
+                  } catch (err: any) {
+                    alert(err.message || 'Failed to save social media settings');
+                  } finally {
+                    setSavingSocialMedia(false);
+                  }
+                }}
+                className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold px-5 py-2.5 transition-colors cursor-pointer uppercase text-[10px] tracking-[0.15em] flex items-center gap-2 disabled:opacity-50"
+              >
+                <span>{savingSocialMedia ? 'Saving...' : 'Save Changes'}</span>
+              </button>
+
+              <button
+                type="button"
+                disabled={savingSocialMedia}
+                onClick={() => {
+                  if (initialSocialSettings) {
+                    setSettings({
+                      ...settings,
+                      social_media: JSON.parse(JSON.stringify(initialSocialSettings))
+                    });
+                    setSocialMediaSuccessMsg('Settings reset to last saved state.');
+                    setTimeout(() => setSocialMediaSuccessMsg(null), 3000);
+                  }
+                }}
+                className="bg-white hover:bg-stone-50 border border-stone-200 text-stone-700 px-4 py-2.5 transition-colors cursor-pointer uppercase text-[10px] tracking-[0.15em] flex items-center gap-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5 text-stone-500" />
+                <span>Reset / Cancel</span>
+              </button>
+            </div>
           </div>
 
           {/* Email Notification System Card */}

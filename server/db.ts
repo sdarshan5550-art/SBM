@@ -35,10 +35,30 @@ import {
   ChannelInventorySummary,
   AboutPageImage,
   ChannelRestriction,
-  PendingExternalEvent
+  PendingExternalEvent,
+  SocialMediaSettings
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
 import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
+
+export const defaultSocialMediaSettings: SocialMediaSettings = {
+  instagram: {
+    platform: 'instagram',
+    enabled: true,
+    url: 'https://www.instagram.com/sbmhotel',
+    show_in_header: true,
+    show_on_contact: true,
+    show_in_footer: true
+  },
+  facebook: {
+    platform: 'facebook',
+    enabled: true,
+    url: 'https://www.facebook.com/sbmhotel',
+    show_in_header: true,
+    show_on_contact: true,
+    show_in_footer: true
+  }
+};
 
 interface DatabaseData {
   properties: Property[];
@@ -307,7 +327,8 @@ function getInitialData(): DatabaseData {
       cancellation_policy: 'Full refund if cancelled 48 hours before check-in. 50% refund within 24-48 hours. No refund for same-day cancellation or no-show.',
       payment_gateway_mode: 'test',
       razorpay_key_id: 'rzp_test_sbmhotel2026',
-      currency: 'INR'
+      currency: 'INR',
+      social_media: defaultSocialMediaSettings
     },
     admin_passwords: {
       [DEFAULT_ADMIN_ID]: hashedPassword,
@@ -1001,6 +1022,20 @@ class DatabaseService {
           if (!hasPropertyCovers) {
             const initialCovers = getInitialManagedImages(new Date().toISOString()).filter(img => img.category === 'Property Cover');
             parsed.managed_images = [...initialCovers, ...parsed.managed_images];
+          }
+        }
+
+        if (parsed.settings) {
+          if (!parsed.settings.social_media) {
+            parsed.settings.social_media = defaultSocialMediaSettings;
+          } else {
+            // Ensure instagram and facebook keys exist
+            if (!parsed.settings.social_media.instagram) {
+              parsed.settings.social_media.instagram = defaultSocialMediaSettings.instagram;
+            }
+            if (!parsed.settings.social_media.facebook) {
+              parsed.settings.social_media.facebook = defaultSocialMediaSettings.facebook;
+            }
           }
         }
 
@@ -2433,11 +2468,55 @@ if (updates.price !== undefined) {
 
   // --- SETTINGS ---
   public getSettings(): HotelSettings {
+    if (!this.data.settings) {
+      this.data.settings = {
+        hotel_name: 'SBM Hotel',
+        gst_percent: 12,
+        hold_pending_inventory: true,
+        cancellation_policy: 'Full refund if cancelled 48 hours before check-in.',
+        payment_gateway_mode: 'test',
+        razorpay_key_id: 'rzp_test_sbmhotel2026',
+        currency: 'INR',
+        social_media: defaultSocialMediaSettings
+      };
+    }
+    if (!this.data.settings.social_media) {
+      this.data.settings.social_media = defaultSocialMediaSettings;
+    } else {
+      if (!this.data.settings.social_media.instagram) {
+        this.data.settings.social_media.instagram = defaultSocialMediaSettings.instagram;
+      } else if (this.data.settings.social_media.instagram.show_in_footer === undefined) {
+        this.data.settings.social_media.instagram.show_in_footer = true;
+      }
+      if (!this.data.settings.social_media.facebook) {
+        this.data.settings.social_media.facebook = defaultSocialMediaSettings.facebook;
+      } else if (this.data.settings.social_media.facebook.show_in_footer === undefined) {
+        this.data.settings.social_media.facebook.show_in_footer = true;
+      }
+    }
     return this.data.settings;
   }
 
   public updateSettings(updates: Partial<HotelSettings>): HotelSettings {
-    this.data.settings = { ...this.data.settings, ...updates };
+    const current = this.getSettings();
+    const updatedSocialMedia = updates.social_media
+      ? {
+          instagram: {
+            ...current.social_media!.instagram,
+            ...(updates.social_media.instagram || {})
+          },
+          facebook: {
+            ...current.social_media!.facebook,
+            ...(updates.social_media.facebook || {})
+          }
+        }
+      : current.social_media;
+
+    this.data.settings = {
+      ...current,
+      ...updates,
+      social_media: updatedSocialMedia
+    };
     this.save();
     return this.data.settings;
   }

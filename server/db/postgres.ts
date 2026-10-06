@@ -325,12 +325,30 @@ if (!fs.existsSync(jsonPath)) return;
       }
     }
 
-    // 7. Settings
+    // 7. Settings & Social Media
     if (data.settings) {
       const s = data.settings;
+      const sm = s.social_media || {
+        instagram: {
+          platform: 'instagram',
+          enabled: true,
+          url: 'https://www.instagram.com/sbmhotel',
+          show_in_header: true,
+          show_on_contact: true,
+          show_in_footer: true
+        },
+        facebook: {
+          platform: 'facebook',
+          enabled: true,
+          url: 'https://www.facebook.com/sbmhotel',
+          show_in_header: true,
+          show_on_contact: true,
+          show_in_footer: true
+        }
+      };
       await client.query(`
-        INSERT INTO settings (id, hotel_name, gst_percent, hold_pending_inventory, cancellation_policy, payment_gateway_mode, razorpay_key_id, currency)
-        VALUES ('default', $1, $2, $3, $4, $5, $6, $7)
+        INSERT INTO settings (id, hotel_name, gst_percent, hold_pending_inventory, cancellation_policy, payment_gateway_mode, razorpay_key_id, currency, social_media)
+        VALUES ('default', $1, $2, $3, $4, $5, $6, $7, $8)
         ON CONFLICT (id) DO UPDATE SET
           hotel_name = EXCLUDED.hotel_name,
           gst_percent = EXCLUDED.gst_percent,
@@ -338,7 +356,8 @@ if (!fs.existsSync(jsonPath)) return;
           cancellation_policy = EXCLUDED.cancellation_policy,
           payment_gateway_mode = EXCLUDED.payment_gateway_mode,
           razorpay_key_id = EXCLUDED.razorpay_key_id,
-          currency = EXCLUDED.currency
+          currency = EXCLUDED.currency,
+          social_media = EXCLUDED.social_media
       `, [
         s.hotel_name || 'SBM Hotel & SBM 2 Guest House',
         s.gst_percent || 12,
@@ -346,8 +365,33 @@ if (!fs.existsSync(jsonPath)) return;
         s.cancellation_policy || '',
         s.payment_gateway_mode || 'test',
         s.razorpay_key_id || '',
-        s.currency || 'INR'
+        s.currency || 'INR',
+        JSON.stringify(sm)
       ]);
+
+      // Also populate social_media_settings relational table
+      for (const p of ['instagram', 'facebook'] as const) {
+        const item = sm[p];
+        if (item) {
+          await client.query(`
+            INSERT INTO social_media_settings (id, platform, enabled, url, show_in_header, show_on_contact)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (platform) DO UPDATE SET
+              enabled = EXCLUDED.enabled,
+              url = EXCLUDED.url,
+              show_in_header = EXCLUDED.show_in_header,
+              show_on_contact = EXCLUDED.show_on_contact,
+              updated_at = CURRENT_TIMESTAMP
+          `, [
+            `soc-${p}`,
+            p,
+            item.enabled ?? true,
+            item.url || '',
+            item.show_in_header ?? true,
+            item.show_on_contact ?? true
+          ]);
+        }
+      }
     }
 
     // 8. Activities
@@ -2340,5 +2384,85 @@ export async function postgresGetRoomTypes(propertyCode?: string): Promise<any[]
     status: rt.status
   }));
 }
+
+// 13. SOCIAL MEDIA SETTINGS QUERIES
+export async function postgresGetSocialMediaSettings(): Promise<any> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const res = await pool.query('SELECT * FROM social_media_settings ORDER BY platform ASC');
+  const defaults = {
+    instagram: {
+      platform: 'instagram',
+      enabled: true,
+      url: 'https://www.instagram.com/sbmhotel',
+      show_in_header: true,
+      show_on_contact: true,
+      show_in_footer: true
+    },
+    facebook: {
+      platform: 'facebook',
+      enabled: true,
+      url: 'https://www.facebook.com/sbmhotel',
+      show_in_header: true,
+      show_on_contact: true,
+      show_in_footer: true
+    }
+  };
+
+  if (!res.rows || res.rows.length === 0) {
+    return defaults;
+  }
+
+  const result: any = { ...defaults };
+  for (const row of res.rows) {
+    if (row.platform === 'instagram' || row.platform === 'facebook') {
+      result[row.platform] = {
+        platform: row.platform,
+        enabled: Boolean(row.enabled),
+        url: row.url || '',
+        show_in_header: Boolean(row.show_in_header),
+        show_on_contact: Boolean(row.show_on_contact),
+        show_in_footer: row.show_in_footer !== undefined ? Boolean(row.show_in_footer) : true
+      };
+    }
+  }
+  return result;
+}
+
+export async function postgresUpdateSocialMediaSettings(settings: any): Promise<any> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const platforms = ['instagram', 'facebook'] as const;
+  for (const p of platforms) {
+    const item = settings[p];
+    if (item) {
+      await pool.query(`
+        INSERT INTO social_media_settings (id, platform, enabled, url, show_in_header, show_on_contact, show_in_footer, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+        ON CONFLICT (platform) DO UPDATE SET
+          enabled = EXCLUDED.enabled,
+          url = EXCLUDED.url,
+          show_in_header = EXCLUDED.show_in_header,
+          show_on_contact = EXCLUDED.show_on_contact,
+          show_in_footer = EXCLUDED.show_in_footer,
+          updated_at = CURRENT_TIMESTAMP
+      `, [
+        `soc-${p}`,
+        p,
+        item.enabled ?? true,
+        item.url || '',
+        item.show_in_header ?? true,
+        item.show_on_contact ?? true,
+        item.show_in_footer ?? true
+      ]);
+    }
+  }
+
+  // Also sync to settings table JSON column
+  await pool.query(`
+    UPDATE settings SET social_media = $1, updated_at = CURRENT_TIMESTAMP WHERE id = 'default'
+  `, [JSON.stringify(settings)]);
+
+  return postgresGetSocialMediaSettings();
+}
+
 
 

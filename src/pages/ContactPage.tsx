@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { MapPin, Phone, Mail, Send, CheckCircle2, Clock } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { MapPin, Phone, Mail, Send, CheckCircle2, Clock, Instagram, Facebook } from 'lucide-react';
 import { api } from '../lib/api';
+import { SocialMediaSettings } from '../types';
 
 export const ContactPage: React.FC = () => {
   const [name, setName] = useState('');
@@ -12,6 +13,30 @@ export const ContactPage: React.FC = () => {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [socialSettings, setSocialSettings] = useState<SocialMediaSettings | null>(null);
+
+  useEffect(() => {
+    api.getSettings().then((s) => {
+      if (s.social_media) {
+        setSocialSettings(s.social_media);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const instagramVisible = Boolean(
+    socialSettings?.instagram?.enabled &&
+    socialSettings?.instagram?.show_on_contact &&
+    socialSettings?.instagram?.url
+  );
+
+  const facebookVisible = Boolean(
+    socialSettings?.facebook?.enabled &&
+    socialSettings?.facebook?.show_on_contact &&
+    socialSettings?.facebook?.url
+  );
+
+  const hasContactSocials = instagramVisible || facebookVisible;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -129,6 +154,45 @@ export const ContactPage: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Social Media Links Section */}
+      {hasContactSocials && (
+        <div className="bg-white border border-[#C5A059]/20 p-6 sm:p-8 text-center space-y-4 max-w-3xl mx-auto shadow-sm">
+          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#C5A059]">Social Media</span>
+          <h3 className="text-xl sm:text-2xl font-serif text-[#1A1A1A] font-medium">Connect With Us Online</h3>
+          <p className="text-xs text-[#666666] max-w-md mx-auto">
+            Stay updated with temple festivals, special room rates, and spiritual updates from Salasar Balaji.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
+            {instagramVisible && (
+              <a
+                href={socialSettings!.instagram.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2.5 px-5 py-2.5 bg-[#FDFCFB] hover:bg-[#C5A059]/10 border border-stone-200 hover:border-[#C5A059] text-[#1A1A1A] hover:text-[#C5A059] transition-all text-xs font-medium rounded-xs shadow-2xs group"
+              >
+                <div className="w-7 h-7 rounded-full bg-[#1A1A1A] group-hover:bg-[#C5A059] text-white flex items-center justify-center transition-colors">
+                  <Instagram className="w-3.5 h-3.5" />
+                </div>
+                <span>Follow us on Instagram</span>
+              </a>
+            )}
+            {facebookVisible && (
+              <a
+                href={socialSettings!.facebook.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2.5 px-5 py-2.5 bg-[#FDFCFB] hover:bg-[#C5A059]/10 border border-stone-200 hover:border-[#C5A059] text-[#1A1A1A] hover:text-[#C5A059] transition-all text-xs font-medium rounded-xs shadow-2xs group"
+              >
+                <div className="w-7 h-7 rounded-full bg-[#1A1A1A] group-hover:bg-[#C5A059] text-white flex items-center justify-center transition-colors">
+                  <Facebook className="w-3.5 h-3.5" />
+                </div>
+                <span>Connect on Facebook</span>
+              </a>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Inquiry Form */}
       <div className="bg-white border border-[#C5A059]/20 p-6 sm:p-10 shadow-sm max-w-3xl mx-auto">

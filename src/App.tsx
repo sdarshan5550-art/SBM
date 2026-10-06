@@ -10,9 +10,9 @@ import { PoliciesPage } from './pages/PoliciesPage';
 import { AdminPage } from './pages/AdminPage';
 import { ConciergeChat } from './components/ConciergeChat';
 import { BookingFlowModal } from './components/BookingFlowModal';
-import { RoomAvailabilityResult, Booking, PropertyCode, RoomCategoryCode } from './types';
+import { RoomAvailabilityResult, Booking, PropertyCode, RoomCategoryCode, SocialMediaSettings } from './types';
 import { api } from './lib/api';
-import { Phone, Mail, MapPin, Calendar, HeartHandshake } from 'lucide-react';
+import { Phone, Mail, MapPin, Calendar, HeartHandshake, Instagram, Facebook } from 'lucide-react';
 
 const getInitialTab = () => {
   const path = window.location.pathname.toLowerCase();
@@ -25,6 +25,7 @@ const getInitialTab = () => {
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>(getInitialTab);
   const [propertyCodeParam, setPropertyCodeParam] = useState<string | undefined>(undefined);
+  const [socialSettings, setSocialSettings] = useState<SocialMediaSettings | null>(null);
 
   useEffect(() => {
     const handleLocationChange = () => {
@@ -38,6 +39,28 @@ export default function App() {
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
+
+  useEffect(() => {
+    api.getSettings().then((s) => {
+      if (s.social_media) {
+        setSocialSettings(s.social_media);
+      }
+    }).catch(() => {});
+  }, []);
+
+  const instagramFooterVisible = Boolean(
+    socialSettings?.instagram?.enabled &&
+    (socialSettings?.instagram?.show_in_footer ?? true) &&
+    socialSettings?.instagram?.url
+  );
+
+  const facebookFooterVisible = Boolean(
+    socialSettings?.facebook?.enabled &&
+    (socialSettings?.facebook?.show_in_footer ?? true) &&
+    socialSettings?.facebook?.url
+  );
+
+  const hasFooterSocials = instagramFooterVisible || facebookFooterVisible;
 
   // Booking Modal State
   const [bookingModalOpen, setBookingModalOpen] = useState(false);
@@ -100,6 +123,7 @@ export default function App() {
         currentTab={currentTab}
         setCurrentTab={(tab) => handleNavigate(tab)}
         onOpenBookingModal={handleOpenQuickBookingModal}
+        socialMediaSettings={socialSettings || undefined}
       />
 
       {/* Main Content View */}
@@ -198,6 +222,38 @@ export default function App() {
               <p className="text-xs text-white/60 leading-relaxed">
                 Premium accommodation near Sri Salasar Balaji Temple, Salasar, Rajasthan. Delivering refined comfort and pure vegetarian Indian hospitality.
               </p>
+
+              {hasFooterSocials && (
+                <div className="pt-2 space-y-2">
+                  <span className="block text-[11px] font-semibold text-[#C5A059] uppercase tracking-[0.2em]">Follow Us</span>
+                  <div className="flex items-center gap-2.5">
+                    {instagramFooterVisible && (
+                      <a
+                        href={socialSettings!.instagram.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Instagram"
+                        title="Instagram"
+                        className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#C5A059] text-white/80 hover:text-white flex items-center justify-center transition-colors border border-white/10"
+                      >
+                        <Instagram className="w-4 h-4" />
+                      </a>
+                    )}
+                    {facebookFooterVisible && (
+                      <a
+                        href={socialSettings!.facebook.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label="Facebook"
+                        title="Facebook"
+                        className="w-8 h-8 rounded-full bg-white/10 hover:bg-[#C5A059] text-white/80 hover:text-white flex items-center justify-center transition-colors border border-white/10"
+                      >
+                        <Facebook className="w-4 h-4" />
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Column 2: Quick Links */}
