@@ -16,7 +16,7 @@ import { Phone, Mail, MapPin, Calendar, HeartHandshake, Instagram, Facebook } fr
 
 const getInitialTab = () => {
   const path = window.location.pathname.toLowerCase();
-  if (path === '/admin' || path === '/admin/' || path.endsWith('/admin')) {
+  if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) {
     return 'admin';
   }
   return 'home';
@@ -30,8 +30,10 @@ export default function App() {
   useEffect(() => {
     const handleLocationChange = () => {
       const path = window.location.pathname.toLowerCase();
-      if (path === '/admin' || path === '/admin/' || path.endsWith('/admin')) {
+      if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) {
         setCurrentTab('admin');
+      } else if (path === '/admin' || path === '/admin/' || path.endsWith('/admin')) {
+        setCurrentTab('home');
       }
     };
 
@@ -50,13 +52,13 @@ export default function App() {
 
   const instagramFooterVisible = Boolean(
     socialSettings?.instagram?.enabled &&
-    (socialSettings?.instagram?.show_in_footer ?? true) &&
+    (socialSettings?.instagram?.show_in_footer ?? socialSettings?.instagram?.showInFooter ?? true) &&
     socialSettings?.instagram?.url
   );
 
   const facebookFooterVisible = Boolean(
     socialSettings?.facebook?.enabled &&
-    (socialSettings?.facebook?.show_in_footer ?? true) &&
+    (socialSettings?.facebook?.show_in_footer ?? socialSettings?.facebook?.showInFooter ?? true) &&
     socialSettings?.facebook?.url
   );
 
@@ -79,11 +81,11 @@ export default function App() {
       setPropertyCodeParam(params.code);
     }
     if (page === 'admin') {
-      if (window.location.pathname !== '/admin') {
-        window.history.pushState({}, '', '/admin');
+      if (window.location.pathname !== '/decn') {
+        window.history.pushState({}, '', '/decn');
       }
     } else {
-      if (window.location.pathname === '/admin' || window.location.pathname.endsWith('/admin')) {
+      if (window.location.pathname === '/decn' || window.location.pathname.endsWith('/decn') || window.location.pathname === '/admin') {
         window.history.pushState({}, '', '/');
       }
     }

@@ -13,7 +13,14 @@ import {
   initializePostgres,
   isPostgresAvailable,
   postgresGetSocialMediaSettings,
-  postgresUpdateSocialMediaSettings
+  postgresUpdateSocialMediaSettings,
+  postgresGetCoupons,
+  postgresGetCouponByCode,
+  postgresCreateCoupon,
+  postgresUpdateCoupon,
+  postgresDeleteCoupon,
+  postgresRecordCouponUsage,
+  postgresGetCouponUsage
 } from './server/db/postgres';
 import { reservationService } from './server/services/reservationService';
 import { inventoryService } from './server/services/inventoryService';
@@ -269,6 +276,7 @@ async function startServer() {
         guest_phone,
         guest_email,
         special_request = '',
+        coupon_code,
         existing_booking_id
       } = req.body;
 
@@ -325,11 +333,34 @@ async function startServer() {
       const pricePerNight = matchedResult.pricePerNight;
       const roomsCount = Number(rooms);
       const subtotal = pricePerNight * nights * roomsCount;
-      const taxAmount = Math.round(subtotal * 0.12);
-      const totalAmount = subtotal + taxAmount;
+
+      let discountAmount = 0;
+      let appliedCouponCode: string | undefined = undefined;
+
+      if (coupon_code && typeof coupon_code === 'string' && coupon_code.trim()) {
+        const valRes = db.validateCoupon({
+          code: coupon_code,
+          roomId: matchedResult.roomType.id,
+          bookingAmount: subtotal,
+          guestEmail: cleanEmail,
+          guestPhone: cleanPhone
+        });
+
+        if (valRes.valid) {
+          discountAmount = valRes.discountAmount;
+          appliedCouponCode = valRes.code;
+        } else {
+          return res.status(400).json({ error: `Coupon error: ${valRes.error || 'Invalid coupon code.'}` });
+        }
+      }
+
+      const taxableAmount = Math.max(0, subtotal - discountAmount);
+      const gstPercent = db.getSettings().gst_percent || 12;
+      const taxAmount = Math.round(taxableAmount * (gstPercent / 100));
+      const totalAmount = taxableAmount + taxAmount;
       const amountInPaise = Math.round(totalAmount * 100);
 
-      console.log(`[Pricing Razorpay] ORDER CREATION -> Room: ${matchedResult.roomType.name} (${matchedResult.roomType.id}), DB Price: ₹${pricePerNight}/night, Nights: ${nights}, Rooms: ${roomsCount}, Subtotal: ₹${subtotal}, GST(12%): ₹${taxAmount}, Total: ₹${totalAmount}, Razorpay Amount: ${amountInPaise} paise`);
+      console.log(`[Pricing Razorpay] ORDER CREATION -> Room: ${matchedResult.roomType.name} (${matchedResult.roomType.id}), DB Price: ₹${pricePerNight}/night, Nights: ${nights}, Rooms: ${roomsCount}, Subtotal: ₹${subtotal}, Coupon Discount: -₹${discountAmount}, Taxable: ₹${taxableAmount}, GST(${gstPercent}%): ₹${taxAmount}, Total: ₹${totalAmount}, Razorpay Amount: ${amountInPaise} paise`);
 
       // Handle Existing Booking (e.g., customer retrying failed/dismissed payment)
       let booking;
@@ -348,6 +379,8 @@ async function startServer() {
             nights,
             price_per_night: pricePerNight,
             room_subtotal: subtotal,
+            discount_amount: discountAmount,
+            coupon_code: appliedCouponCode,
             tax_amount: taxAmount,
             total_amount: totalAmount,
             payment_status: 'Pending',
@@ -376,6 +409,8 @@ async function startServer() {
           nights,
           price_per_night: pricePerNight,
           room_subtotal: subtotal,
+          discount_amount: discountAmount,
+          coupon_code: appliedCouponCode,
           tax_amount: taxAmount,
           total_amount: totalAmount,
           payment_status: 'Pending',
@@ -502,10 +537,21 @@ async function startServer() {
         payment_verified_at: verifiedAt
       });
 
+      // Record Coupon Usage if coupon was applied
+      if (updatedBooking.coupon_code) {
+        const coupon = db.getCouponByCode(updatedBooking.coupon_code);
+        if (coupon) {
+          if (isPostgresAvailable()) {
+            postgresRecordCouponUsage(coupon.id, updatedBooking.id, updatedBooking.guest_email, updatedBooking.guest_phone, updatedBooking.discount_amount || 0).catch(console.error);
+          }
+          db.recordCouponUsage(coupon.id, updatedBooking.id, updatedBooking.guest_email, updatedBooking.guest_phone, updatedBooking.discount_amount || 0);
+        }
+      }
+
       // Front desk activity log
       db.addActivity(
         'Payment',
-        `₹${booking.total_amount.toLocaleString('en-IN')} paid via Razorpay by ${booking.guest_name} (${booking.booking_number}). Txn: ${razorpay_payment_id}`,
+        `₹${booking.total_amount.toLocaleString('en-IN')} paid via Razorpay by ${booking.guest_name} (${booking.booking_number}). Txn: ${razorpay_payment_id}${updatedBooking.coupon_code ? ' [Coupon: ' + updatedBooking.coupon_code + ']' : ''}`,
         booking.property_code,
         'Razorpay Gateway'
       );
@@ -652,6 +698,71 @@ async function startServer() {
       res.json(settings);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Public Coupon Validation
+  app.post('/api/coupons/validate', async (req, res) => {
+    try {
+      const { code, roomId, bookingAmount, guestEmail, guestPhone } = req.body;
+      const amt = Number(bookingAmount) || 0;
+
+      if (!code || typeof code !== 'string') {
+        return res.status(400).json({
+          valid: false,
+          discountAmount: 0,
+          eligibleAmount: amt,
+          taxableAmount: amt,
+          taxAmount: Math.round(amt * 0.12),
+          totalAmount: Math.round(amt * 1.12),
+          error: 'Coupon code is required.'
+        });
+      }
+
+      let result;
+      if (isPostgresAvailable()) {
+        try {
+          const pgCoupon = await postgresGetCouponByCode(code);
+          if (pgCoupon) {
+            result = db.validateCoupon({
+              code,
+              roomId,
+              bookingAmount: amt,
+              guestEmail,
+              guestPhone
+            });
+          }
+        } catch (e) {
+          // Fallback to db.validateCoupon
+        }
+      }
+
+      if (!result) {
+        result = db.validateCoupon({
+          code,
+          roomId,
+          bookingAmount: amt,
+          guestEmail,
+          guestPhone
+        });
+      }
+
+      if (!result.valid) {
+        return res.status(400).json(result);
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      const amt = Number(req.body.bookingAmount) || 0;
+      res.status(500).json({
+        valid: false,
+        discountAmount: 0,
+        eligibleAmount: amt,
+        taxableAmount: amt,
+        taxAmount: Math.round(amt * 0.12),
+        totalAmount: Math.round(amt * 1.12),
+        error: err.message || 'Failed to validate coupon.'
+      });
     }
   });
 
@@ -902,6 +1013,65 @@ ${JSON.stringify(liveAvail, null, 2)}
     }
   });
 
+  const adminOtpStore = new Map<string, { otp: string; expiresAt: number }>();
+
+  app.post('/api/admin/forgot-password', async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email || !email.trim()) {
+        return res.status(400).json({ error: 'Admin email address is required.' });
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = Date.now() + 15 * 60 * 1000;
+      adminOtpStore.set(cleanEmail, { otp, expiresAt });
+
+      await emailService.sendAdminPasswordResetOtp(cleanEmail, otp);
+
+      res.json({
+        success: true,
+        message: 'If an admin account with that email exists, an OTP has been sent to manager@sbmhotel.com.'
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to process request.' });
+    }
+  });
+
+  app.post('/api/admin/reset-password', (req, res) => {
+    try {
+      const { email, otp, newPassword } = req.body;
+      if (!email || !otp || !newPassword) {
+        return res.status(400).json({ error: 'Email, OTP, and new password are required.' });
+      }
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+      }
+      const cleanEmail = email.trim().toLowerCase();
+      const stored = adminOtpStore.get(cleanEmail);
+      if (!stored) {
+        return res.status(400).json({ error: 'Invalid or expired OTP. Please request a new OTP.' });
+      }
+      if (Date.now() > stored.expiresAt) {
+        adminOtpStore.delete(cleanEmail);
+        return res.status(400).json({ error: 'OTP has expired. Please request a new OTP.' });
+      }
+      if (stored.otp !== otp.trim()) {
+        return res.status(400).json({ error: 'Incorrect OTP. Please check the OTP sent to manager@sbmhotel.com.' });
+      }
+
+      const updated = db.updateAdminPassword(cleanEmail, newPassword.trim());
+      if (!updated) {
+        return res.status(404).json({ error: 'Admin account not found for specified email.' });
+      }
+
+      adminOtpStore.delete(cleanEmail);
+      res.json({ success: true, message: 'Password reset successfully! You can now log in with your new password.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Failed to reset password.' });
+    }
+  });
+
   app.get('/api/admin/verify', authenticateAdmin, (req, res) => {
     res.json({ valid: true, admin: (req as any).admin });
   });
@@ -1142,6 +1312,148 @@ res.json({
       res.json(updated);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
+    }
+  });
+
+  // --- ADMIN COUPON SYSTEM ENDPOINTS ---
+  app.get('/api/admin/coupons', authenticateAdmin, async (req, res) => {
+    try {
+      let coupons: any[] = [];
+      if (isPostgresAvailable()) {
+        try {
+          coupons = await postgresGetCoupons();
+        } catch (e) {
+          coupons = db.getCoupons();
+        }
+      } else {
+        coupons = db.getCoupons();
+      }
+
+      const now = new Date();
+      const activeCount = coupons.filter(c => c.status === 'active' && (!c.valid_until || new Date(c.valid_until) >= now)).length;
+      const expiredCount = coupons.filter(c => c.valid_until && new Date(c.valid_until) < now).length;
+      const totalUses = coupons.reduce((sum, c) => sum + (c.used_count || 0), 0);
+
+      // Total discount given across bookings
+      const bookings = db.getBookings();
+      const totalDiscountGiven = bookings.reduce((sum, b) => sum + (Number(b.discount_amount) || 0), 0);
+
+      res.json({
+        coupons,
+        summary: {
+          activeCount,
+          expiredCount,
+          totalUses,
+          totalDiscountGiven
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/admin/coupons', authenticateAdmin, async (req, res) => {
+    try {
+      let created;
+      if (isPostgresAvailable()) {
+        try {
+          created = await postgresCreateCoupon(req.body);
+          db.createCoupon(req.body); // Keep JSON in sync
+        } catch (e) {
+          created = db.createCoupon(req.body);
+        }
+      } else {
+        created = db.createCoupon(req.body);
+      }
+      res.status(201).json(created);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/coupons/:id', authenticateAdmin, async (req, res) => {
+    try {
+      const coupon = db.getCouponById(req.params.id);
+      if (!coupon) return res.status(404).json({ error: 'Coupon not found.' });
+      res.json(coupon);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/admin/coupons/:id', authenticateAdmin, async (req, res) => {
+    try {
+      let updated;
+      if (isPostgresAvailable()) {
+        try {
+          updated = await postgresUpdateCoupon(req.params.id, req.body);
+          db.updateCoupon(req.params.id, req.body); // Keep JSON in sync
+        } catch (e) {
+          updated = db.updateCoupon(req.params.id, req.body);
+        }
+      } else {
+        updated = db.updateCoupon(req.params.id, req.body);
+      }
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.patch('/api/admin/coupons/:id/status', authenticateAdmin, async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (status !== 'active' && status !== 'inactive') {
+        return res.status(400).json({ error: 'Status must be active or inactive.' });
+      }
+      let updated;
+      if (isPostgresAvailable()) {
+        try {
+          updated = await postgresUpdateCoupon(req.params.id, { status });
+          db.updateCoupon(req.params.id, { status });
+        } catch (e) {
+          updated = db.updateCoupon(req.params.id, { status });
+        }
+      } else {
+        updated = db.updateCoupon(req.params.id, { status });
+      }
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/admin/coupons/:id', authenticateAdmin, async (req, res) => {
+    try {
+      if (isPostgresAvailable()) {
+        try {
+          await postgresDeleteCoupon(req.params.id);
+        } catch (e) {
+          // fallback
+        }
+      }
+      const deleted = db.deleteCoupon(req.params.id);
+      res.json({ success: true, deleted });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/admin/coupons/:id/usage', authenticateAdmin, async (req, res) => {
+    try {
+      let usage = [];
+      if (isPostgresAvailable()) {
+        try {
+          usage = await postgresGetCouponUsage(req.params.id);
+        } catch (e) {
+          usage = db.getCouponUsage(req.params.id);
+        }
+      } else {
+        usage = db.getCouponUsage(req.params.id);
+      }
+      res.json(usage);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

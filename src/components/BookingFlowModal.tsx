@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Calendar, Building, Users, ShieldCheck, CheckCircle2, ArrowRight, ArrowLeft, CreditCard, Lock, AlertCircle, RefreshCw, Check } from 'lucide-react';
-import { RoomAvailabilityResult, Booking } from '../types';
+import { X, Calendar, Building, Users, ShieldCheck, CheckCircle2, ArrowRight, ArrowLeft, CreditCard, Lock, AlertCircle, RefreshCw, Check, Tag, Ticket } from 'lucide-react';
+import { RoomAvailabilityResult, Booking, CouponValidateResult } from '../types';
 import { api } from '../lib/api';
 import { openRazorpayCheckout } from '../lib/razorpay';
 import { BookingVoucher } from './BookingVoucher';
@@ -34,6 +34,12 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   const [agreedTerms, setAgreedTerms] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<'online_razorpay' | 'pay_at_hotel'>('online_razorpay');
 
+  // Coupon System State
+  const [couponCodeInput, setCouponCodeInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponValidateResult | null>(null);
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,17 +52,59 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
     api.getPaymentConfig()
       .then(setGatewayConfig)
       .catch(() => {
-        // Fallback config if network delay
         setGatewayConfig({ key_id: 'rzp_test_sbmhotel2026', is_configured: false, mode: 'test' });
       });
   }, []);
 
-  // Validation checks
   const cleanPhone = guestPhone.trim();
   const cleanEmail = guestEmail.trim().toLowerCase();
 
   const isPhoneValid = /^[0-9]{10}$/.test(cleanPhone);
   const isEmailValid = /^[a-z0-9._%+-]+@gmail\.com$/.test(cleanEmail);
+
+  // Dynamic pricing calculation with coupon
+  const subtotalAmt = selectedResult.subtotal;
+  const discountAmt = appliedCoupon?.valid ? appliedCoupon.discountAmount : 0;
+  const taxableAmt = Math.max(0, subtotalAmt - discountAmt);
+  const taxAmt = appliedCoupon?.valid ? appliedCoupon.taxAmount : selectedResult.taxAmount;
+  const finalTotalAmt = appliedCoupon?.valid ? appliedCoupon.totalAmount : selectedResult.totalAmount;
+
+  const handleApplyCoupon = async () => {
+    if (!couponCodeInput.trim()) {
+      setCouponError('Please enter a coupon code.');
+      return;
+    }
+    setCouponLoading(true);
+    setCouponError(null);
+    try {
+      const res = await api.validateCoupon({
+        code: couponCodeInput.trim(),
+        roomId: selectedResult.roomType.id,
+        bookingAmount: subtotalAmt,
+        guestEmail: cleanEmail || undefined,
+        guestPhone: cleanPhone || undefined
+      });
+
+      if (res.valid) {
+        setAppliedCoupon(res);
+        setCouponError(null);
+      } else {
+        setAppliedCoupon(null);
+        setCouponError(res.error || 'Invalid coupon code.');
+      }
+    } catch (err: any) {
+      setAppliedCoupon(null);
+      setCouponError(err.message || 'Failed to validate coupon code.');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponCodeInput('');
+    setCouponError(null);
+  };
 
   // Handle Online Razorpay Payment Flow
   const handlePayWithRazorpay = async () => {
@@ -78,6 +126,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
         guest_phone: cleanPhone,
         guest_email: cleanEmail,
         special_request: specialRequest.trim(),
+        coupon_code: appliedCoupon?.code,
         existing_booking_id: activePendingBookingId || undefined
       });
 
@@ -186,8 +235,10 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
         nights: selectedResult.nights,
         price_per_night: selectedResult.pricePerNight,
         room_subtotal: selectedResult.subtotal,
-        tax_amount: selectedResult.taxAmount,
-        total_amount: selectedResult.totalAmount,
+        discount_amount: discountAmt,
+        coupon_code: appliedCoupon?.code,
+        tax_amount: taxAmt,
+        total_amount: finalTotalAmt,
         payment_method: 'pay_at_hotel',
         payment_status: 'Pending',
         booking_status: 'Confirmed',
@@ -498,22 +549,106 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                   </div>
                 </div>
 
+                {/* Have a coupon code? Section */}
+                <div className="bg-[#FDFCFB] p-4 border border-stone-200 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-[#1A1A1A] flex items-center gap-1.5">
+                      <Ticket className="w-4 h-4 text-[#C5A059]" />
+                      Have a coupon code?
+                    </span>
+                    {appliedCoupon?.valid && (
+                      <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200 rounded-xs flex items-center gap-1">
+                        <Check className="w-3 h-3 text-emerald-600" />
+                        Coupon Applied ({appliedCoupon.code})
+                      </span>
+                    )}
+                  </div>
+
+                  {!appliedCoupon?.valid ? (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={couponCodeInput}
+                        onChange={(e) => {
+                          setCouponCodeInput(e.target.value.toUpperCase());
+                          if (couponError) setCouponError(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleApplyCoupon();
+                          }
+                        }}
+                        placeholder="e.g. SBM10 or WELCOME500"
+                        className="flex-1 bg-white border border-stone-200 px-3 py-2 text-xs font-mono uppercase text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                      />
+                      <button
+                        type="button"
+                        disabled={couponLoading || !couponCodeInput.trim()}
+                        onClick={handleApplyCoupon}
+                        className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 cursor-pointer"
+                      >
+                        {couponLoading ? 'Applying...' : 'Apply'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="bg-emerald-50/60 border border-emerald-200 p-3 rounded-xs flex items-center justify-between">
+                      <div className="text-xs text-emerald-900">
+                        <span className="font-bold block text-sm text-emerald-800">
+                          {appliedCoupon.code} &mdash; Saved ₹{discountAmt.toLocaleString('en-IN')}
+                        </span>
+                        <span className="text-[11px] text-emerald-700">
+                          {appliedCoupon.message || 'Coupon discount applied to taxable room charges.'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleRemoveCoupon}
+                        className="text-xs text-rose-700 hover:text-rose-900 font-bold underline cursor-pointer ml-3 shrink-0"
+                      >
+                        Remove Coupon
+                      </button>
+                    </div>
+                  )}
+
+                  {couponError && (
+                    <p className="text-rose-600 text-xs font-medium flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{couponError}</span>
+                    </p>
+                  )}
+                </div>
+
                 {/* Price Breakdown */}
                 <div className="bg-[#FDFCFB] p-4 border border-stone-200 space-y-2 text-xs">
                   <h4 className="font-bold text-[#C5A059] uppercase tracking-[0.2em] text-[10px] mb-2">Price Breakdown</h4>
                   <div className="flex justify-between text-[#666666]">
                     <span>
-                      {selectedResult.roomType.name} ({searchParams.rooms} Room × {selectedResult.nights} Night @ ₹{selectedResult.pricePerNight.toLocaleString('en-IN')})
+                      Room Charges ({searchParams.rooms} Room × {selectedResult.nights} Night @ ₹{selectedResult.pricePerNight.toLocaleString('en-IN')})
                     </span>
-                    <span className="font-medium text-[#1A1A1A]">₹{selectedResult.subtotal.toLocaleString('en-IN')}</span>
+                    <span className="font-medium text-[#1A1A1A]">₹{subtotalAmt.toLocaleString('en-IN')}</span>
                   </div>
+
+                  {discountAmt > 0 && (
+                    <>
+                      <div className="flex justify-between text-emerald-700 font-medium">
+                        <span>Coupon Discount ({appliedCoupon?.code || 'Applied'})</span>
+                        <span className="font-bold">-₹{discountAmt.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="flex justify-between text-[#666666] pt-0.5 border-t border-dashed border-stone-200">
+                        <span>Taxable Amount</span>
+                        <span className="font-medium text-[#1A1A1A]">₹{taxableAmt.toLocaleString('en-IN')}</span>
+                      </div>
+                    </>
+                  )}
+
                   <div className="flex justify-between text-[#666666]">
                     <span>GST & Taxes (12%)</span>
-                    <span className="font-medium text-[#1A1A1A]">₹{selectedResult.taxAmount.toLocaleString('en-IN')}</span>
+                    <span className="font-medium text-[#1A1A1A]">₹{taxAmt.toLocaleString('en-IN')}</span>
                   </div>
                   <div className="border-t border-stone-200 pt-2 flex justify-between text-sm font-serif font-bold text-[#1A1A1A]">
-                    <span>Total Amount</span>
-                    <span className="text-[#C5A059] text-base font-bold">₹{selectedResult.totalAmount.toLocaleString('en-IN')}</span>
+                    <span>Total Amount Payable</span>
+                    <span className="text-[#C5A059] text-base font-bold">₹{finalTotalAmt.toLocaleString('en-IN')}</span>
                   </div>
                 </div>
 
@@ -610,12 +745,12 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                     ) : paymentMethod === 'online_razorpay' ? (
                       <>
                         <Lock className="w-3.5 h-3.5 text-[#C5A059]" />
-                        <span>PAY NOW (₹{selectedResult.totalAmount.toLocaleString('en-IN')})</span>
+                        <span>PAY NOW (₹{finalTotalAmt.toLocaleString('en-IN')})</span>
                       </>
                     ) : (
                       <>
                         <Building className="w-3.5 h-3.5 text-[#C5A059]" />
-                        <span>Confirm Reservation (₹{selectedResult.totalAmount.toLocaleString('en-IN')})</span>
+                        <span>Confirm Reservation (₹{finalTotalAmt.toLocaleString('en-IN')})</span>
                       </>
                     )}
                   </button>

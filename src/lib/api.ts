@@ -24,7 +24,11 @@ import {
   NormalizedOTAReservation,
   ChannelInventorySummary,
   AboutPageImage,
-  ChannelRestriction
+  ChannelRestriction,
+  Coupon,
+  CouponUsage,
+  CouponValidateResult,
+  CouponStatus
 } from '../types';
 
 const ADMIN_TOKEN_KEY = 'sbm_admin_token';
@@ -116,6 +120,13 @@ export const api = {
     }),
   getSettings: () => request<HotelSettings>('/api/settings'),
 
+  // Coupon System
+  validateCoupon: (params: { code: string; roomId?: string; bookingAmount: number; guestEmail?: string; guestPhone?: string }) =>
+    request<CouponValidateResult>('/api/coupons/validate', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    }),
+
   // Razorpay Payments API
   getPaymentConfig: () => request<{ key_id: string; is_configured: boolean; mode: 'test' | 'live'; currency: string }>('/api/payments/config'),
   createPaymentOrder: (payload: any) => request<{
@@ -164,6 +175,16 @@ export const api = {
     method: 'POST',
     body: JSON.stringify({ email, password: pass })
   }),
+  adminForgotPassword: (email: string) =>
+    request<{ success: boolean; message: string }>('/api/admin/forgot-password', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    }),
+  adminResetPassword: (params: { email: string; otp: string; newPassword: string }) =>
+    request<{ success: boolean; message: string }>('/api/admin/reset-password', {
+      method: 'POST',
+      body: JSON.stringify(params)
+    }),
   adminVerifyToken: () => request<{ valid: boolean; admin: any }>('/api/admin/verify'),
   getAdminOverview: () => request<any>('/api/admin/overview'),
   getAdminBookings: (filters?: { propertyCode?: string; bookingStatus?: string; paymentStatus?: string; search?: string; date?: string }) => {
@@ -208,6 +229,39 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(updates)
   }),
+
+  // Admin Coupon Management
+  getAdminCoupons: () =>
+    request<{
+      coupons: Coupon[];
+      summary: {
+        activeCount: number;
+        expiredCount: number;
+        totalUses: number;
+        totalDiscountGiven: number;
+      };
+    }>('/api/admin/coupons'),
+  createAdminCoupon: (coupon: Partial<Coupon>) =>
+    request<Coupon>('/api/admin/coupons', {
+      method: 'POST',
+      body: JSON.stringify(coupon)
+    }),
+  getAdminCouponById: (id: string) => request<Coupon>(`/api/admin/coupons/${id}`),
+  updateAdminCoupon: (id: string, updates: Partial<Coupon>) =>
+    request<Coupon>(`/api/admin/coupons/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates)
+    }),
+  toggleAdminCouponStatus: (id: string, status: CouponStatus) =>
+    request<Coupon>(`/api/admin/coupons/${id}/status`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    }),
+  deleteAdminCoupon: (id: string) =>
+    request<{ success: boolean; deleted: boolean }>(`/api/admin/coupons/${id}`, {
+      method: 'DELETE'
+    }),
+  getAdminCouponUsage: (id: string) => request<CouponUsage[]>(`/api/admin/coupons/${id}/usage`),
 
   // Admin sub-object for convenience
   admin: {

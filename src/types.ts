@@ -197,6 +197,7 @@ export interface Booking {
   internal_notes?: string;
   created_by?: string;
   source_booking_id?: string;
+  coupon_code?: string;
   created_at: string;
   updated_at: string;
   payments?: PaymentRecord[];
@@ -425,6 +426,9 @@ export interface SocialMediaLinkConfig {
   show_in_header: boolean;
   show_on_contact: boolean;
   show_in_footer: boolean;
+  showInHeader?: boolean;
+  showOnContact?: boolean;
+  showInFooter?: boolean;
 }
 
 export interface SocialMediaSettings {
@@ -754,4 +758,54 @@ export interface PendingExternalEvent {
   received_at: string;
   processed_at?: string;
 }
+
+// --- COUPON SYSTEM TYPES ---
+export type CouponDiscountType = 'percentage' | 'fixed';
+export type CouponStatus = 'active' | 'inactive';
+
+export interface Coupon {
+  id: string;
+  code: string;
+  discount_type: CouponDiscountType;
+  discount_value: number;
+  minimum_booking_amount?: number;
+  maximum_discount?: number;
+  valid_from?: string;
+  valid_until?: string;
+  usage_limit?: number | null;
+  used_count: number;
+  per_customer_limit?: number | null;
+  applicable_rooms?: string[]; // array of room_type_ids or room_codes
+  status: CouponStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CouponUsage {
+  id: string;
+  coupon_id: string;
+  coupon_code?: string;
+  booking_id: string;
+  booking_number?: string;
+  guest_email?: string;
+  guest_phone?: string;
+  discount_amount: number;
+  used_at: string;
+}
+
+export interface CouponValidateResult {
+  valid: boolean;
+  coupon_id?: string;
+  code?: string;
+  discountType?: CouponDiscountType;
+  discountValue?: number;
+  discountAmount: number;
+  eligibleAmount: number;
+  taxableAmount: number;
+  taxAmount: number;
+  totalAmount: number;
+  message?: string;
+  error?: string;
+}
+
 

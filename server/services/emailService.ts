@@ -270,7 +270,7 @@ Children:     ${booking.children || 0}
 PAYMENT & PRICE
 -----------------
 Room Amount:  ${formatINR(booking.room_subtotal)}
-GST/Taxes:    ${formatINR(booking.tax_amount)}
+${booking.discount_amount && booking.discount_amount > 0 ? `Coupon (${booking.coupon_code || 'Discount'}): -${formatINR(booking.discount_amount)}\nTaxable Amount: ${formatINR(Math.max(0, (booking.room_subtotal || 0) - (booking.discount_amount || 0)))}\n` : ''}GST/Taxes:    ${formatINR(booking.tax_amount)}
 Total Amount: ${formatINR(booking.total_amount)}
 Amount Paid:  ${formatINR(amountPaid)}
 Balance Due:  ${formatINR(remainingAmount)}
@@ -423,6 +423,15 @@ We wish you a blessed darshan at Sri Salasar Balaji Temple!
                   <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Room Subtotal</td>
                   <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right;">${formatINR(booking.room_subtotal)}</td>
                 </tr>
+                ${booking.discount_amount && booking.discount_amount > 0 ? `
+                <tr>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #15803d; font-weight: 600;">Coupon Discount (${booking.coupon_code || 'Applied'})</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #15803d; font-weight: 700; text-align: right;">-${formatINR(booking.discount_amount)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">Taxable Amount</td>
+                  <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right;">${formatINR(Math.max(0, (booking.room_subtotal || 0) - (booking.discount_amount || 0)))}</td>
+                </tr>` : ''}
                 <tr>
                   <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #71717a;">GST / Taxes (12%)</td>
                   <td style="padding: 10px 14px; border-bottom: 1px solid #e4e4e7; color: #18181b; text-align: right;">${formatINR(booking.tax_amount)}</td>
@@ -901,11 +910,56 @@ ${hotel.name} Front Desk
   }
 }
 
+// 5. ADMIN PASSWORD RESET OTP EMAIL
+export async function sendAdminPasswordResetOtp(
+  adminEmail: string,
+  otpCode: string
+): Promise<{ success: boolean; simulated?: boolean; messageId?: string }> {
+  const recipient = 'manager@sbmhotel.com';
+  const cfg = getEmailConfig();
+  const subject = `SBM Hotel Admin - Password Reset OTP`;
+  const textContent = `A password reset request was initiated for SBM Hotel admin account: ${adminEmail}.\n\nYour One-Time Password (OTP) is: ${otpCode}\n\nThis OTP is valid for 15 minutes.\nIf you did not request a password reset, please secure your account immediately.`;
+  const htmlContent = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #C5A059; padding: 20px; background-color: #FAF9F6;">
+      <h2 style="color: #1A1A1A; border-bottom: 2px solid #C5A059; padding-bottom: 10px;">SBM Hotel Admin - Password Reset</h2>
+      <p style="font-size: 14px; color: #333;">A password reset request was requested for admin account: <strong>${adminEmail}</strong>.</p>
+      <div style="background-color: #1A1A1A; color: #C5A059; padding: 15px; text-align: center; font-size: 24px; font-weight: bold; letter-spacing: 4px; margin: 20px 0;">
+        ${otpCode}
+      </div>
+      <p style="font-size: 13px; color: #666;">This One-Time Password (OTP) is valid for <strong>15 minutes</strong>.</p>
+      <p style="font-size: 12px; color: #888; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px;">If you did not request this password reset, please ignore this email.</p>
+    </div>
+  `;
+
+  const mailer = getTransporter();
+  if (!mailer) {
+    console.log(`[EMAIL] Simulated admin password reset OTP for ${adminEmail} sent to ${recipient}: OTP ${otpCode}`);
+    return { success: true, simulated: true };
+  }
+
+  try {
+    const info = await mailer.sendMail({
+      from: cfg.from,
+      to: recipient,
+      subject,
+      text: textContent,
+      html: htmlContent
+    });
+    console.log(`[EMAIL] Admin password reset OTP sent to ${recipient} (Message ID: ${info.messageId})`);
+    return { success: true, messageId: info.messageId };
+  } catch (sendErr: any) {
+    recordSmtpFailure(sendErr);
+    console.log(`[EMAIL] Simulated admin password reset OTP for ${adminEmail} sent to ${recipient}: OTP ${otpCode}`);
+    return { success: true, simulated: true };
+  }
+}
+
 export const emailService = {
   getConfig: getEmailConfig,
   verifySmtp: verifySmtpConnection,
   sendBookingConfirmationEmail,
   sendAdminBookingNotification,
   sendBookingCancellationEmail,
-  sendBookingModificationEmail
+  sendBookingModificationEmail,
+  sendAdminPasswordResetOtp
 };

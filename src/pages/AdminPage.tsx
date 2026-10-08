@@ -31,7 +31,8 @@ import {
   Instagram,
   Facebook,
   ExternalLink,
-  RotateCcw
+  RotateCcw,
+  Ticket
 } from 'lucide-react';
 import { api, getAdminToken, setAdminToken, clearAdminToken } from '../lib/api';
 import { Booking, Property, RoomType, BlockedRoom, Inquiry, HotelSettings } from '../types';
@@ -40,6 +41,7 @@ import { KnowledgeBaseAdmin } from '../components/KnowledgeBaseAdmin';
 import { RoomManagementTab } from '../components/RoomManagementTab';  
 import { ImageManagementTab } from '../components/ImageManagementTab';
 import { ChannelManagerTab } from '../components/ChannelManagerTab';
+import { CouponManagementTab } from '../components/CouponManagementTab';
 import { PMSCalendarView } from '../components/pms/PMSCalendarView';
 import { PMSPaymentsTab } from '../components/pms/PMSPaymentsTab';
 import { PMSGuestsTab } from '../components/pms/PMSGuestsTab';
@@ -60,7 +62,66 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
   const [loginError, setLoginError] = useState<string | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
 
-  // Active Admin Subtab
+  // Forgot Password state
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotOtp, setForgotOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [forgotMsg, setForgotMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [forgotLoading, setForgotLoading] = useState(false);
+
+  const handleSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      setForgotMsg({ type: 'error', text: 'Please enter your admin email address.' });
+      return;
+    }
+    setForgotLoading(true);
+    setForgotMsg(null);
+    try {
+      const res = await api.adminForgotPassword(forgotEmail.trim());
+      setForgotMsg({ type: 'success', text: res.message || 'OTP has been dispatched to manager@sbmhotel.com.' });
+      setForgotStep(2);
+    } catch (err: any) {
+      setForgotMsg({ type: 'error', text: err.message || 'Failed to send OTP.' });
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim() || !forgotOtp.trim() || !newPassword.trim()) {
+      setForgotMsg({ type: 'error', text: 'Please fill in all required fields.' });
+      return;
+    }
+    if (newPassword.length < 6) {
+      setForgotMsg({ type: 'error', text: 'New password must be at least 6 characters long.' });
+      return;
+    }
+    setForgotLoading(true);
+    setForgotMsg(null);
+    try {
+      const res = await api.adminResetPassword({
+        email: forgotEmail.trim(),
+        otp: forgotOtp.trim(),
+        newPassword: newPassword.trim()
+      });
+      setForgotMsg({ type: 'success', text: res.message || 'Password reset successfully! You can now log in.' });
+      setTimeout(() => {
+        setShowForgotPassword(false);
+        setForgotStep(1);
+        setLoginEmail(forgotEmail.trim());
+        setLoginPassword('');
+        setForgotMsg(null);
+      }, 2000);
+    } catch (err: any) {
+      setForgotMsg({ type: 'error', text: err.message || 'Failed to reset password.' });
+    } finally {
+      setForgotLoading(false);
+    }
+  };
   const [activeTab, setActiveTab] = useState<
     | 'frontdesk'
     | 'tapechart'
@@ -77,6 +138,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     | 'properties'
     | 'inquiries'
     | 'knowledge'
+    | 'coupons'
     | 'settings'
   >('frontdesk');
 
@@ -284,6 +346,143 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
 
   // LOGIN SCREEN
   if (!isAuthenticated) {
+    if (showForgotPassword) {
+      return (
+        <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
+          <div className="w-full max-w-md bg-white border border-[#C5A059]/20 p-8 shadow-sm text-[#1A1A1A] space-y-6">
+            <div className="text-center space-y-2">
+              <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] font-serif font-bold text-xl flex items-center justify-center mx-auto shadow-sm">
+                SBM
+              </div>
+              <h2 className="text-2xl font-serif font-medium text-[#1A1A1A]">Forgot Admin Password</h2>
+              <p className="text-xs text-[#666666]">
+                {forgotStep === 1
+                  ? 'Enter your admin email to receive a password reset OTP at manager@sbmhotel.com'
+                  : 'Enter the 6-digit OTP sent to manager@sbmhotel.com and your new password'}
+              </p>
+            </div>
+
+            {forgotMsg && (
+              <div
+                className={`p-3 text-xs font-medium border ${
+                  forgotMsg.type === 'success'
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                    : 'bg-rose-50 border-rose-200 text-rose-800'
+                }`}
+              >
+                {forgotMsg.text}
+              </div>
+            )}
+
+            {forgotStep === 1 ? (
+              <form onSubmit={handleSendOtp} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#1A1A1A] mb-1">Admin Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="admin@sbmhotel.com"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-2.5 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={forgotLoading}
+                  className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 transition-colors text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <span>{forgotLoading ? 'Sending OTP...' : 'SEND OTP'}</span>
+                </button>
+
+                <div className="text-center pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setForgotMsg(null);
+                    }}
+                    className="text-xs text-[#C5A059] hover:underline font-medium cursor-pointer"
+                  >
+                    &larr; Back to Admin Login
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <form onSubmit={handleResetPassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-medium text-[#1A1A1A] mb-1">Admin Email Address</label>
+                  <input
+                    type="email"
+                    required
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-2.5 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#1A1A1A] mb-1">6-Digit OTP</label>
+                  <input
+                    type="text"
+                    required
+                    maxLength={6}
+                    placeholder="123456"
+                    value={forgotOtp}
+                    onChange={(e) => setForgotOtp(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-2.5 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059] tracking-widest font-mono"
+                  />
+                  <p className="text-[10px] text-stone-400 mt-1">Check email inbox for manager@sbmhotel.com</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-medium text-[#1A1A1A] mb-1">New Password</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="At least 6 characters"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-2.5 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={forgotLoading}
+                  className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 transition-colors text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <span>{forgotLoading ? 'Updating Password...' : 'RESET PASSWORD'}</span>
+                </button>
+
+                <div className="flex items-center justify-between pt-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setForgotStep(1)}
+                    className="text-stone-500 hover:text-[#1A1A1A] underline cursor-pointer"
+                  >
+                    Resend OTP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowForgotPassword(false);
+                      setForgotStep(1);
+                      setForgotMsg(null);
+                    }}
+                    className="text-[#C5A059] hover:underline font-medium cursor-pointer"
+                  >
+                    Back to Login
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-[80vh] flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md bg-white border border-[#C5A059]/20 p-8 shadow-sm text-[#1A1A1A] space-y-6">
@@ -293,12 +492,6 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
             </div>
             <h2 className="text-2xl font-serif font-medium text-[#1A1A1A]">Admin Portal</h2>
             <p className="text-xs text-[#666666]">SBM Hotel & Guest House Management System</p>
-          </div>
-
-          <div className="bg-[#C5A059]/10 border border-[#C5A059]/30 p-3 text-[11px] text-[#1A1A1A]">
-            <strong>Default Credentials:</strong><br />
-            Email: <code className="text-[#1A1A1A] font-bold">admin@sbmhotel.com</code><br />
-            Password: <code className="text-[#1A1A1A] font-bold">sbmadmin2026!</code>
           </div>
 
           {loginError && (
@@ -338,6 +531,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
               <Lock className="w-4 h-4 text-[#C5A059]" />
               <span>{loggingIn ? 'Authenticating...' : 'LOG IN TO DASHBOARD'}</span>
             </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotPassword(true);
+                  setForgotEmail(loginEmail);
+                  setForgotStep(1);
+                  setForgotMsg(null);
+                }}
+                className="text-xs text-[#C5A059] hover:underline font-medium cursor-pointer"
+              >
+                Forgot Password?
+              </button>
+            </div>
           </form>
         </div>
       </div>
@@ -508,6 +716,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
         >
           <Mail className="w-3.5 h-3.5 text-[#C5A059]" />
           Inquiries ({inquiries.length})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('coupons')}
+          className={`px-4 py-2.5 text-xs font-serif uppercase tracking-[0.15em] whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'coupons' ? 'bg-[#1A1A1A] text-white font-bold' : 'bg-white text-[#666666] border border-stone-200 hover:text-[#1A1A1A]'
+          }`}
+        >
+          <Ticket className="w-3.5 h-3.5 text-[#C5A059]" />
+          Coupons
         </button>
 
         <button
@@ -849,7 +1067,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                         <strong className="text-[#1A1A1A]">{selectedBooking.payment_method === 'online_razorpay' ? 'Razorpay Gateway (Online)' : 'Pay at Reception'}</strong>
                       </div>
                       <div>
-                        <span className="text-[#666666] block">Total Amount:</span>
+                        <span className="text-[#666666] block">Room Charges:</span>
+                        <span className="text-[#1A1A1A]">₹{selectedBooking.room_subtotal?.toLocaleString('en-IN') || selectedBooking.total_amount?.toLocaleString('en-IN')}</span>
+                      </div>
+                      {selectedBooking.discount_amount && selectedBooking.discount_amount > 0 ? (
+                        <>
+                          <div>
+                            <span className="text-[#666666] block">Coupon Applied ({selectedBooking.coupon_code}):</span>
+                            <span className="font-bold text-emerald-700">-₹{selectedBooking.discount_amount?.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div>
+                            <span className="text-[#666666] block">Taxable Amount:</span>
+                            <span className="text-[#1A1A1A]">₹{Math.max(0, (selectedBooking.room_subtotal || 0) - (selectedBooking.discount_amount || 0)).toLocaleString('en-IN')}</span>
+                          </div>
+                        </>
+                      ) : null}
+                      <div>
+                        <span className="text-[#666666] block">GST Amount:</span>
+                        <span className="text-[#1A1A1A]">₹{selectedBooking.tax_amount?.toLocaleString('en-IN') || 0}</span>
+                      </div>
+                      <div>
+                        <span className="text-[#666666] block">Final Total Amount:</span>
                         <strong className="text-sm font-serif text-[#C5A059]">₹{selectedBooking.total_amount?.toLocaleString('en-IN')}</strong>
                       </div>
                       {selectedBooking.razorpay_order_id && (
@@ -1235,6 +1473,11 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
             </div>
           )}
         </div>
+      )}
+
+      {/* TAB 6: COUPON MANAGEMENT */}
+      {activeTab === 'coupons' && (
+        <CouponManagementTab roomTypes={roomTypes} />
       )}
 
       {/* TAB 6: SETTINGS */}

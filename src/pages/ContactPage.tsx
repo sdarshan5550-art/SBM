@@ -26,13 +26,13 @@ export const ContactPage: React.FC = () => {
 
   const instagramVisible = Boolean(
     socialSettings?.instagram?.enabled &&
-    socialSettings?.instagram?.show_on_contact &&
+    (socialSettings?.instagram?.show_on_contact ?? socialSettings?.instagram?.showOnContact ?? true) &&
     socialSettings?.instagram?.url
   );
 
   const facebookVisible = Boolean(
     socialSettings?.facebook?.enabled &&
-    socialSettings?.facebook?.show_on_contact &&
+    (socialSettings?.facebook?.show_on_contact ?? socialSettings?.facebook?.showOnContact ?? true) &&
     socialSettings?.facebook?.url
   );
 

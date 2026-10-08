@@ -44,13 +44,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
 
   const instagramVisible = Boolean(
     socialSettings?.instagram?.enabled &&
-    socialSettings?.instagram?.show_in_header &&
+    (socialSettings?.instagram?.show_in_header ?? socialSettings?.instagram?.showInHeader ?? true) &&
     socialSettings?.instagram?.url
   );
 
   const facebookVisible = Boolean(
     socialSettings?.facebook?.enabled &&
-    socialSettings?.facebook?.show_in_header &&
+    (socialSettings?.facebook?.show_in_header ?? socialSettings?.facebook?.showInHeader ?? true) &&
     socialSettings?.facebook?.url
   );
 

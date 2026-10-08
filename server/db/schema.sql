@@ -476,3 +476,49 @@ CREATE TABLE IF NOT EXISTS about_page_images (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- ==========================================================
+-- 20. COUPON SYSTEM TABLES
+-- ==========================================================
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS coupon_code VARCHAR(64);
+
+CREATE TABLE IF NOT EXISTS coupons (
+    id VARCHAR(64) PRIMARY KEY,
+    code VARCHAR(64) UNIQUE NOT NULL,
+    discount_type VARCHAR(32) NOT NULL DEFAULT 'percentage',
+    discount_value NUMERIC(10, 2) NOT NULL,
+    minimum_booking_amount NUMERIC(10, 2) DEFAULT 0.00,
+    maximum_discount NUMERIC(10, 2),
+    valid_from TIMESTAMP WITH TIME ZONE,
+    valid_until TIMESTAMP WITH TIME ZONE,
+    usage_limit INT,
+    used_count INT DEFAULT 0,
+    per_customer_limit INT DEFAULT 1,
+    applicable_rooms JSONB DEFAULT '[]'::jsonb,
+    status VARCHAR(32) DEFAULT 'active',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_coupons_code ON coupons(code);
+CREATE INDEX IF NOT EXISTS idx_coupons_status ON coupons(status);
+
+CREATE TABLE IF NOT EXISTS coupon_rooms (
+    coupon_id VARCHAR(64) REFERENCES coupons(id) ON DELETE CASCADE,
+    room_type_id VARCHAR(64) REFERENCES room_types(id) ON DELETE CASCADE,
+    PRIMARY KEY (coupon_id, room_type_id)
+);
+
+CREATE TABLE IF NOT EXISTS coupon_usage (
+    id VARCHAR(64) PRIMARY KEY,
+    coupon_id VARCHAR(64) REFERENCES coupons(id) ON DELETE CASCADE,
+    booking_id VARCHAR(64) REFERENCES reservations(id) ON DELETE CASCADE,
+    guest_email VARCHAR(128),
+    guest_phone VARCHAR(32),
+    discount_amount NUMERIC(10, 2) NOT NULL,
+    used_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_coupon_usage_coupon_id ON coupon_usage(coupon_id);
+CREATE INDEX IF NOT EXISTS idx_coupon_usage_guest ON coupon_usage(guest_email, guest_phone);
+

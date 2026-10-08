@@ -36,7 +36,10 @@ import {
   AboutPageImage,
   ChannelRestriction,
   PendingExternalEvent,
-  SocialMediaSettings
+  SocialMediaSettings,
+  Coupon,
+  CouponUsage,
+  CouponValidateResult
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
 import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
@@ -48,7 +51,10 @@ export const defaultSocialMediaSettings: SocialMediaSettings = {
     url: 'https://www.instagram.com/sbmhotel',
     show_in_header: true,
     show_on_contact: true,
-    show_in_footer: true
+    show_in_footer: true,
+    showInHeader: true,
+    showOnContact: true,
+    showInFooter: true
   },
   facebook: {
     platform: 'facebook',
@@ -56,7 +62,10 @@ export const defaultSocialMediaSettings: SocialMediaSettings = {
     url: 'https://www.facebook.com/sbmhotel',
     show_in_header: true,
     show_on_contact: true,
-    show_in_footer: true
+    show_in_footer: true,
+    showInHeader: true,
+    showOnContact: true,
+    showInFooter: true
   }
 };
 
@@ -84,6 +93,8 @@ interface DatabaseData {
   sync_jobs?: SyncJob[];
   channel_restrictions?: ChannelRestriction[];
   pending_external_events?: PendingExternalEvent[];
+  coupons?: Coupon[];
+  coupon_usage?: CouponUsage[];
 }
 
 const currentFilename = typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url);
@@ -2539,6 +2550,20 @@ if (updates.price !== undefined) {
     return valid ? admin : null;
   }
 
+  public updateAdminPassword(email: string, newPass: string): boolean {
+    const cleanEmail = email.trim().toLowerCase();
+    const admin = this.data.admins?.find(a => a.email.toLowerCase() === cleanEmail);
+    if (!admin) return false;
+    if (!this.data.admin_passwords) {
+      this.data.admin_passwords = {};
+    }
+    const salt = bcrypt.genSaltSync(10);
+    const hash = bcrypt.hashSync(newPass, salt);
+    this.data.admin_passwords[admin.id] = hash;
+    this.save();
+    return true;
+  }
+
   // --- CHANNEL MANAGER ENGINE & PERSISTENCE ---
   public getChannels(): ChannelConfig[] {
     if (!this.data.channels) {
@@ -3670,6 +3695,312 @@ if (updates.price !== undefined) {
       results.push(this.saveChannelRestriction(r));
     }
     return results;
+  }
+
+  // --- COUPON SYSTEM METHODS ---
+  private ensureCouponsSeed(): Coupon[] {
+    if (!this.data.coupons || this.data.coupons.length === 0) {
+      const now = new Date().toISOString();
+      const future = new Date(Date.now() + 365 * 86400000).toISOString();
+      this.data.coupons = [
+        {
+          id: 'cpn-sbm10',
+          code: 'SBM10',
+          discount_type: 'percentage',
+          discount_value: 10,
+          minimum_booking_amount: 1000,
+          maximum_discount: 1000,
+          valid_from: now,
+          valid_until: future,
+          usage_limit: 500,
+          used_count: 0,
+          per_customer_limit: 2,
+          applicable_rooms: [],
+          status: 'active',
+          created_at: now,
+          updated_at: now
+        },
+        {
+          id: 'cpn-welcome500',
+          code: 'WELCOME500',
+          discount_type: 'fixed',
+          discount_value: 500,
+          minimum_booking_amount: 2000,
+          valid_from: now,
+          valid_until: future,
+          usage_limit: 200,
+          used_count: 0,
+          per_customer_limit: 1,
+          applicable_rooms: [],
+          status: 'active',
+          created_at: now,
+          updated_at: now
+        }
+      ];
+      this.save();
+    }
+    return this.data.coupons;
+  }
+
+  public getCoupons(): Coupon[] {
+    return this.ensureCouponsSeed();
+  }
+
+  public getCouponByCode(code: string): Coupon | null {
+    const list = this.getCoupons();
+    const norm = code.trim().toUpperCase();
+    return list.find(c => c.code.trim().toUpperCase() === norm) || null;
+  }
+
+  public getCouponById(id: string): Coupon | null {
+    const list = this.getCoupons();
+    return list.find(c => c.id === id) || null;
+  }
+
+  public createCoupon(data: Partial<Coupon>): Coupon {
+    if (!data.code || !data.code.trim()) {
+      throw new Error('Coupon code is required.');
+    }
+    const normCode = data.code.trim().toUpperCase();
+    if (!/^[A-Z0-9_-]+$/.test(normCode)) {
+      throw new Error('Coupon code can only contain uppercase letters, numbers, underscores, and hyphens.');
+    }
+
+    const existing = this.getCouponByCode(normCode);
+    if (existing) {
+      throw new Error(`Coupon code '${normCode}' already exists.`);
+    }
+
+    const discValue = Number(data.discount_value);
+    if (!discValue || discValue <= 0) {
+      throw new Error('Discount value must be greater than 0.');
+    }
+    if (data.discount_type === 'percentage' && discValue > 100) {
+      throw new Error('Percentage discount cannot exceed 100%.');
+    }
+
+    const now = new Date().toISOString();
+    const newCoupon: Coupon = {
+      id: data.id || `cpn-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      code: normCode,
+      discount_type: data.discount_type || 'percentage',
+      discount_value: discValue,
+      minimum_booking_amount: data.minimum_booking_amount ? Number(data.minimum_booking_amount) : 0,
+      maximum_discount: data.maximum_discount ? Number(data.maximum_discount) : undefined,
+      valid_from: data.valid_from || undefined,
+      valid_until: data.valid_until || undefined,
+      usage_limit: data.usage_limit ? Number(data.usage_limit) : null,
+      used_count: 0,
+      per_customer_limit: data.per_customer_limit !== undefined && data.per_customer_limit !== null ? Number(data.per_customer_limit) : 1,
+      applicable_rooms: Array.isArray(data.applicable_rooms) ? data.applicable_rooms : [],
+      status: data.status || 'active',
+      created_at: now,
+      updated_at: now
+    };
+
+    if (!this.data.coupons) this.data.coupons = [];
+    this.data.coupons.unshift(newCoupon);
+    this.save();
+    return newCoupon;
+  }
+
+  public updateCoupon(id: string, updates: Partial<Coupon>): Coupon {
+    const list = this.getCoupons();
+    const idx = list.findIndex(c => c.id === id);
+    if (idx === -1) throw new Error('Coupon not found');
+
+    const cur = list[idx];
+    let newCode = cur.code;
+    if (updates.code && updates.code.trim()) {
+      newCode = updates.code.trim().toUpperCase();
+      if (newCode !== cur.code) {
+        const dup = list.find(c => c.id !== id && c.code.trim().toUpperCase() === newCode);
+        if (dup) throw new Error(`Coupon code '${newCode}' is already used by another coupon.`);
+      }
+    }
+
+    const discValue = updates.discount_value !== undefined ? Number(updates.discount_value) : cur.discount_value;
+    const discType = updates.discount_type || cur.discount_type;
+
+    if (discValue <= 0) {
+      throw new Error('Discount value must be greater than 0.');
+    }
+    if (discType === 'percentage' && discValue > 100) {
+      throw new Error('Percentage discount cannot exceed 100%.');
+    }
+
+    const updated: Coupon = {
+      ...cur,
+      ...updates,
+      code: newCode,
+      discount_type: discType,
+      discount_value: discValue,
+      minimum_booking_amount: updates.minimum_booking_amount !== undefined ? Number(updates.minimum_booking_amount) : cur.minimum_booking_amount,
+      maximum_discount: updates.maximum_discount !== undefined ? (updates.maximum_discount ? Number(updates.maximum_discount) : undefined) : cur.maximum_discount,
+      valid_from: updates.valid_from !== undefined ? updates.valid_from : cur.valid_from,
+      valid_until: updates.valid_until !== undefined ? updates.valid_until : cur.valid_until,
+      usage_limit: updates.usage_limit !== undefined ? (updates.usage_limit ? Number(updates.usage_limit) : null) : cur.usage_limit,
+      per_customer_limit: updates.per_customer_limit !== undefined ? (updates.per_customer_limit !== null ? Number(updates.per_customer_limit) : null) : cur.per_customer_limit,
+      applicable_rooms: Array.isArray(updates.applicable_rooms) ? updates.applicable_rooms : cur.applicable_rooms,
+      status: updates.status || cur.status,
+      updated_at: new Date().toISOString()
+    };
+
+    this.data.coupons![idx] = updated;
+    this.save();
+    return updated;
+  }
+
+  public deleteCoupon(id: string): boolean {
+    if (!this.data.coupons) return false;
+    const initialLen = this.data.coupons.length;
+    this.data.coupons = this.data.coupons.filter(c => c.id !== id);
+    if (this.data.coupons.length !== initialLen) {
+      this.save();
+      return true;
+    }
+    return false;
+  }
+
+  public validateCoupon(params: {
+    code: string;
+    roomId?: string;
+    bookingAmount: number;
+    guestEmail?: string;
+    guestPhone?: string;
+  }): CouponValidateResult {
+    const { code, roomId, bookingAmount, guestEmail, guestPhone } = params;
+
+    if (!code || !code.trim()) {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'Please enter a coupon code.' };
+    }
+
+    const coupon = this.getCouponByCode(code);
+    if (!coupon) {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'Invalid coupon code.' };
+    }
+
+    if (coupon.status !== 'active') {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'This coupon is currently inactive.' };
+    }
+
+    const now = new Date();
+    if (coupon.valid_from && new Date(coupon.valid_from) > now) {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'This coupon is not valid yet.' };
+    }
+    if (coupon.valid_until && new Date(coupon.valid_until) < now) {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'This coupon has expired.' };
+    }
+
+    if (coupon.usage_limit && coupon.used_count >= coupon.usage_limit) {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'This coupon has reached its maximum usage limit.' };
+    }
+
+    // Per customer limit check
+    if (coupon.per_customer_limit && (guestEmail || guestPhone)) {
+      const usages = this.data.coupon_usage || [];
+      const userUsageCount = usages.filter(u => 
+        u.coupon_id === coupon.id && 
+        ((guestEmail && u.guest_email && u.guest_email.toLowerCase() === guestEmail.toLowerCase()) ||
+         (guestPhone && u.guest_phone && u.guest_phone === guestPhone))
+      ).length;
+
+      if (userUsageCount >= coupon.per_customer_limit) {
+        return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: `You have already used this coupon the maximum allowed number of times (${coupon.per_customer_limit}).` };
+      }
+    }
+
+    // Room restriction check
+    if (Array.isArray(coupon.applicable_rooms) && coupon.applicable_rooms.length > 0 && roomId) {
+      const isRoomAllowed = coupon.applicable_rooms.some(r => r === roomId || r === 'all');
+      if (!isRoomAllowed) {
+        return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: 'This coupon is not valid for the selected room category.' };
+      }
+    }
+
+    // Minimum booking amount check
+    const minAmt = coupon.minimum_booking_amount || 0;
+    if (bookingAmount < minAmt) {
+      return { valid: false, discountAmount: 0, eligibleAmount: bookingAmount, taxableAmount: bookingAmount, taxAmount: 0, totalAmount: bookingAmount, error: `Coupon requires a minimum room charges total of ₹${minAmt.toLocaleString('en-IN')}.` };
+    }
+
+    // Calculate discount
+    let discount = 0;
+    if (coupon.discount_type === 'percentage') {
+      discount = Math.round(bookingAmount * (coupon.discount_value / 100));
+      if (coupon.maximum_discount && coupon.maximum_discount > 0) {
+        discount = Math.min(discount, coupon.maximum_discount);
+      }
+    } else {
+      discount = coupon.discount_value;
+    }
+
+    discount = Math.min(discount, bookingAmount);
+
+    const gstPercent = this.data.settings.gst_percent || 12;
+    const taxableAmount = Math.max(0, bookingAmount - discount);
+    const taxAmount = Math.round(taxableAmount * (gstPercent / 100));
+    const totalAmount = taxableAmount + taxAmount;
+
+    return {
+      valid: true,
+      coupon_id: coupon.id,
+      code: coupon.code,
+      discountType: coupon.discount_type,
+      discountValue: coupon.discount_value,
+      discountAmount: discount,
+      eligibleAmount: bookingAmount,
+      taxableAmount,
+      taxAmount,
+      totalAmount,
+      message: `Coupon ${coupon.code} applied! Saved ₹${discount.toLocaleString('en-IN')}.`
+    };
+  }
+
+  public recordCouponUsage(
+    couponId: string,
+    bookingId: string,
+    guestEmail?: string,
+    guestPhone?: string,
+    discountAmount: number = 0
+  ): boolean {
+    const list = this.getCoupons();
+    const coupon = list.find(c => c.id === couponId || c.code.toUpperCase() === couponId.toUpperCase());
+    if (!coupon) return false;
+
+    if (!this.data.coupon_usage) this.data.coupon_usage = [];
+
+    // Idempotency: avoid double recording for same booking
+    const existing = this.data.coupon_usage.find(u => u.booking_id === bookingId);
+    if (existing) {
+      return true;
+    }
+
+    coupon.used_count = (coupon.used_count || 0) + 1;
+    coupon.updated_at = new Date().toISOString();
+
+    const booking = this.data.bookings.find(b => b.id === bookingId);
+
+    const usage: CouponUsage = {
+      id: `usg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      coupon_id: coupon.id,
+      coupon_code: coupon.code,
+      booking_id: bookingId,
+      booking_number: booking?.booking_number,
+      guest_email: guestEmail || booking?.guest_email,
+      guest_phone: guestPhone || booking?.guest_phone,
+      discount_amount: discountAmount,
+      used_at: new Date().toISOString()
+    };
+
+    this.data.coupon_usage.unshift(usage);
+    this.save();
+    return true;
+  }
+
+  public getCouponUsage(couponId: string): CouponUsage[] {
+    if (!this.data.coupon_usage) this.data.coupon_usage = [];
+    return this.data.coupon_usage.filter(u => u.coupon_id === couponId);
   }
 }
 

@@ -2396,7 +2396,10 @@ export async function postgresGetSocialMediaSettings(): Promise<any> {
       url: 'https://www.instagram.com/sbmhotel',
       show_in_header: true,
       show_on_contact: true,
-      show_in_footer: true
+      show_in_footer: true,
+      showInHeader: true,
+      showOnContact: true,
+      showInFooter: true
     },
     facebook: {
       platform: 'facebook',
@@ -2404,7 +2407,10 @@ export async function postgresGetSocialMediaSettings(): Promise<any> {
       url: 'https://www.facebook.com/sbmhotel',
       show_in_header: true,
       show_on_contact: true,
-      show_in_footer: true
+      show_in_footer: true,
+      showInHeader: true,
+      showOnContact: true,
+      showInFooter: true
     }
   };
 
@@ -2415,13 +2421,20 @@ export async function postgresGetSocialMediaSettings(): Promise<any> {
   const result: any = { ...defaults };
   for (const row of res.rows) {
     if (row.platform === 'instagram' || row.platform === 'facebook') {
+      const showHeader = Boolean(row.show_in_header);
+      const showContact = Boolean(row.show_on_contact);
+      const showFooter = row.show_in_footer !== undefined ? Boolean(row.show_in_footer) : true;
+
       result[row.platform] = {
         platform: row.platform,
         enabled: Boolean(row.enabled),
         url: row.url || '',
-        show_in_header: Boolean(row.show_in_header),
-        show_on_contact: Boolean(row.show_on_contact),
-        show_in_footer: row.show_in_footer !== undefined ? Boolean(row.show_in_footer) : true
+        show_in_header: showHeader,
+        show_on_contact: showContact,
+        show_in_footer: showFooter,
+        showInHeader: showHeader,
+        showOnContact: showContact,
+        showInFooter: showFooter
       };
     }
   }
@@ -2434,6 +2447,10 @@ export async function postgresUpdateSocialMediaSettings(settings: any): Promise<
   for (const p of platforms) {
     const item = settings[p];
     if (item) {
+      const showHeader = item.showInHeader ?? item.show_in_header ?? true;
+      const showContact = item.showOnContact ?? item.show_on_contact ?? true;
+      const showFooter = item.showInFooter ?? item.show_in_footer ?? true;
+
       await pool.query(`
         INSERT INTO social_media_settings (id, platform, enabled, url, show_in_header, show_on_contact, show_in_footer, updated_at)
         VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
@@ -2449,9 +2466,9 @@ export async function postgresUpdateSocialMediaSettings(settings: any): Promise<
         p,
         item.enabled ?? true,
         item.url || '',
-        item.show_in_header ?? true,
-        item.show_on_contact ?? true,
-        item.show_in_footer ?? true
+        showHeader,
+        showContact,
+        showFooter
       ]);
     }
   }
@@ -2462,6 +2479,233 @@ export async function postgresUpdateSocialMediaSettings(settings: any): Promise<
   `, [JSON.stringify(settings)]);
 
   return postgresGetSocialMediaSettings();
+}
+
+// 14. COUPON SYSTEM QUERIES
+export async function postgresGetCoupons(): Promise<any[]> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const res = await pool.query(`
+    SELECT c.*, 
+      COALESCE(
+        (SELECT json_agg(room_type_id) FROM coupon_rooms WHERE coupon_id = c.id),
+        c.applicable_rooms,
+        '[]'::jsonb
+      ) as applicable_rooms
+    FROM coupons c
+    ORDER BY c.created_at DESC
+  `);
+  return res.rows.map(r => ({
+    id: r.id,
+    code: r.code,
+    discount_type: r.discount_type,
+    discount_value: Number(r.discount_value),
+    minimum_booking_amount: Number(r.minimum_booking_amount || 0),
+    maximum_discount: r.maximum_discount ? Number(r.maximum_discount) : null,
+    valid_from: r.valid_from ? new Date(r.valid_from).toISOString() : null,
+    valid_until: r.valid_until ? new Date(r.valid_until).toISOString() : null,
+    usage_limit: r.usage_limit ? Number(r.usage_limit) : null,
+    used_count: Number(r.used_count || 0),
+    per_customer_limit: r.per_customer_limit ? Number(r.per_customer_limit) : 1,
+    applicable_rooms: typeof r.applicable_rooms === 'string' ? JSON.parse(r.applicable_rooms) : (r.applicable_rooms || []),
+    status: r.status || 'active',
+    created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+    updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
+  }));
+}
+
+export async function postgresGetCouponByCode(code: string): Promise<any | null> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const normalizedCode = code.trim().toUpperCase();
+  const res = await pool.query('SELECT * FROM coupons WHERE UPPER(code) = $1', [normalizedCode]);
+  if (res.rows.length === 0) return null;
+  const r = res.rows[0];
+
+  // Get associated room types
+  const roomsRes = await pool.query('SELECT room_type_id FROM coupon_rooms WHERE coupon_id = $1', [r.id]);
+  const roomTypeIds = roomsRes.rows.map(row => row.room_type_id);
+  const applicableRooms = roomTypeIds.length > 0 
+    ? roomTypeIds 
+    : (typeof r.applicable_rooms === 'string' ? JSON.parse(r.applicable_rooms) : (r.applicable_rooms || []));
+
+  return {
+    id: r.id,
+    code: r.code,
+    discount_type: r.discount_type,
+    discount_value: Number(r.discount_value),
+    minimum_booking_amount: Number(r.minimum_booking_amount || 0),
+    maximum_discount: r.maximum_discount ? Number(r.maximum_discount) : null,
+    valid_from: r.valid_from ? new Date(r.valid_from).toISOString() : null,
+    valid_until: r.valid_until ? new Date(r.valid_until).toISOString() : null,
+    usage_limit: r.usage_limit ? Number(r.usage_limit) : null,
+    used_count: Number(r.used_count || 0),
+    per_customer_limit: r.per_customer_limit ? Number(r.per_customer_limit) : 1,
+    applicable_rooms: applicableRooms,
+    status: r.status || 'active',
+    created_at: r.created_at ? new Date(r.created_at).toISOString() : new Date().toISOString(),
+    updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : new Date().toISOString()
+  };
+}
+
+export async function postgresCreateCoupon(data: any): Promise<any> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const normalizedCode = data.code.trim().toUpperCase();
+  const id = data.id || `cpn-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date().toISOString();
+
+  await pool.query(`
+    INSERT INTO coupons (
+      id, code, discount_type, discount_value, minimum_booking_amount, maximum_discount,
+      valid_from, valid_until, usage_limit, used_count, per_customer_limit, applicable_rooms, status, created_at, updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+  `, [
+    id,
+    normalizedCode,
+    data.discount_type || 'percentage',
+    data.discount_value,
+    data.minimum_booking_amount || 0,
+    data.maximum_discount || null,
+    data.valid_from || null,
+    data.valid_until || null,
+    data.usage_limit || null,
+    data.used_count || 0,
+    data.per_customer_limit || 1,
+    JSON.stringify(data.applicable_rooms || []),
+    data.status || 'active',
+    now,
+    now
+  ]);
+
+  if (Array.isArray(data.applicable_rooms) && data.applicable_rooms.length > 0) {
+    for (const roomId of data.applicable_rooms) {
+      if (roomId) {
+        await pool.query(`
+          INSERT INTO coupon_rooms (coupon_id, room_type_id)
+          VALUES ($1, $2)
+          ON CONFLICT DO NOTHING
+        `, [id, roomId]);
+      }
+    }
+  }
+
+  return postgresGetCouponByCode(normalizedCode);
+}
+
+export async function postgresUpdateCoupon(id: string, updates: any): Promise<any> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const now = new Date().toISOString();
+
+  const code = updates.code ? updates.code.trim().toUpperCase() : undefined;
+
+  await pool.query(`
+    UPDATE coupons SET
+      code = COALESCE($1, code),
+      discount_type = COALESCE($2, discount_type),
+      discount_value = COALESCE($3, discount_value),
+      minimum_booking_amount = COALESCE($4, minimum_booking_amount),
+      maximum_discount = $5,
+      valid_from = $6,
+      valid_until = $7,
+      usage_limit = $8,
+      per_customer_limit = COALESCE($9, per_customer_limit),
+      applicable_rooms = COALESCE($10, applicable_rooms),
+      status = COALESCE($11, status),
+      updated_at = $12
+    WHERE id = $13
+  `, [
+    code || null,
+    updates.discount_type || null,
+    updates.discount_value !== undefined ? updates.discount_value : null,
+    updates.minimum_booking_amount !== undefined ? updates.minimum_booking_amount : null,
+    updates.maximum_discount !== undefined ? updates.maximum_discount : null,
+    updates.valid_from !== undefined ? updates.valid_from : null,
+    updates.valid_until !== undefined ? updates.valid_until : null,
+    updates.usage_limit !== undefined ? updates.usage_limit : null,
+    updates.per_customer_limit !== undefined ? updates.per_customer_limit : null,
+    updates.applicable_rooms ? JSON.stringify(updates.applicable_rooms) : null,
+    updates.status || null,
+    now,
+    id
+  ]);
+
+  if (Array.isArray(updates.applicable_rooms)) {
+    await pool.query('DELETE FROM coupon_rooms WHERE coupon_id = $1', [id]);
+    for (const roomId of updates.applicable_rooms) {
+      if (roomId) {
+        await pool.query(`
+          INSERT INTO coupon_rooms (coupon_id, room_type_id)
+          VALUES ($1, $2)
+          ON CONFLICT DO NOTHING
+        `, [id, roomId]);
+      }
+    }
+  }
+
+  const res = await pool.query('SELECT code FROM coupons WHERE id = $1', [id]);
+  if (res.rows.length === 0) throw new Error('Coupon not found');
+  return postgresGetCouponByCode(res.rows[0].code);
+}
+
+export async function postgresDeleteCoupon(id: string): Promise<boolean> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  await pool.query('DELETE FROM coupon_rooms WHERE coupon_id = $1', [id]);
+  const res = await pool.query('DELETE FROM coupons WHERE id = $1', [id]);
+  return (res.rowCount || 0) > 0;
+}
+
+export async function postgresRecordCouponUsage(
+  couponId: string,
+  bookingId: string,
+  guestEmail: string | undefined,
+  guestPhone: string | undefined,
+  discountAmount: number
+): Promise<boolean> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const usageId = `usg-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+  // Concurrency safe update with RETURNING
+  const updateRes = await pool.query(`
+    UPDATE coupons
+    SET used_count = used_count + 1, updated_at = CURRENT_TIMESTAMP
+    WHERE id = $1 AND (usage_limit IS NULL OR used_count < usage_limit)
+    RETURNING id, used_count
+  `, [couponId]);
+
+  if (updateRes.rows.length === 0) {
+    console.warn(`[Coupon System] Failed to increment usage for coupon ${couponId} (limit reached or invalid id).`);
+    return false;
+  }
+
+  await pool.query(`
+    INSERT INTO coupon_usage (id, coupon_id, booking_id, guest_email, guest_phone, discount_amount, used_at)
+    VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+  `, [usageId, couponId, bookingId, guestEmail || null, guestPhone || null, discountAmount]);
+
+  return true;
+}
+
+export async function postgresGetCouponUsage(couponId: string): Promise<any[]> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const res = await pool.query(`
+    SELECT cu.*, c.code as coupon_code, r.booking_number
+    FROM coupon_usage cu
+    LEFT JOIN coupons c ON cu.coupon_id = c.id
+    LEFT JOIN reservations r ON cu.booking_id = r.id
+    WHERE cu.coupon_id = $1
+    ORDER BY cu.used_at DESC
+  `, [couponId]);
+
+  return res.rows.map(r => ({
+    id: r.id,
+    coupon_id: r.coupon_id,
+    coupon_code: r.coupon_code,
+    booking_id: r.booking_id,
+    booking_number: r.booking_number,
+    guest_email: r.guest_email,
+    guest_phone: r.guest_phone,
+    discount_amount: Number(r.discount_amount),
+    used_at: r.used_at ? new Date(r.used_at).toISOString() : new Date().toISOString()
+  }));
 }
 
 
