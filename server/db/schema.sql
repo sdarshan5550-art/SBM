@@ -334,9 +334,12 @@ CREATE TABLE IF NOT EXISTS managed_images (
     display_order INT DEFAULT 0,
     is_primary_cover BOOLEAN DEFAULT FALSE,
     is_main_for_room BOOLEAN DEFAULT FALSE,
+    status VARCHAR(32) DEFAULT 'active',
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE managed_images ADD COLUMN IF NOT EXISTS status VARCHAR(32) DEFAULT 'active';
 
 -- ==========================================================
 -- 18. AUTHORITATIVE SBM CHANNEL MANAGER TABLES

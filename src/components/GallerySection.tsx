@@ -24,84 +24,119 @@ export const GallerySection: React.FC = () => {
     return () => { isMounted = false; };
   }, []);
 
+  const formattedDynamic = (dynamicImages || [])
+    .filter(img => (img.status || 'active') === 'active')
+    .map(img => {
+      const isRooms = img.category === 'Rooms & Interiors' ||
+                      img.category === 'rooms-interiors' ||
+                      img.category === 'rooms' ||
+                      img.roomId === 'deluxe' ||
+                      img.roomId === 'family' ||
+                      img.category.includes('Room') ||
+                      img.category.includes('Suite');
+
+      const isGuestHouse = img.propertyId === 'sbm-guest-house' ||
+                           img.propertyId === 'prop-sbm-guesthouse' ||
+                           img.category.toLowerCase().includes('guest') ||
+                           img.category.toLowerCase().includes('sbm 2');
+
+      const propKey: 'hotel' | 'guesthouse' = isGuestHouse ? 'guesthouse' : 'hotel';
+      const catKey: 'hotel' | 'guesthouse' | 'rooms' = isRooms ? 'rooms' : propKey;
+
+      return {
+        id: img.id,
+        url: img.imageUrl,
+        title: img.title || img.category,
+        subtitle: img.description || (isGuestHouse ? 'SBM 2 Guest House' : 'SBM Hotel'),
+        category: catKey,
+        propertyId: propKey
+      };
+    });
+
   const defaultGalleryItems = [
     {
+      id: 'def-1',
       url: DEFAULT_PHOTOS.sbmHotelExterior,
       title: 'SBM Hotel - Day Exterior Facade',
       subtitle: 'Main Temple Road Facade (SBM Hotel 1)',
-      category: 'hotel'
+      category: 'hotel' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-2',
       url: DEFAULT_PHOTOS.sbmHotelEvening,
       title: 'SBM Hotel - Evening Twilight View',
       subtitle: 'Warm Architectural Night Lighting',
-      category: 'hotel'
+      category: 'hotel' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-3',
       url: DEFAULT_PHOTOS.sbmEntranceFacade,
       title: 'SBM Hotel - Welcome Entrance',
       subtitle: 'Driveway & Temple View Entrance Walkway',
-      category: 'hotel'
+      category: 'hotel' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-4',
       url: DEFAULT_PHOTOS.sbmGuestHouseExterior,
       title: 'SBM 2 Guest House - Front Facade',
       subtitle: 'Peaceful Location on Temple Approach Road',
-      category: 'guesthouse'
+      category: 'guesthouse' as const,
+      propertyId: 'guesthouse' as const
     },
     {
+      id: 'def-5',
       url: DEFAULT_PHOTOS.deluxeRoom,
       title: 'Deluxe Room - Main Bed View',
       subtitle: 'King Bed with Cushioned Leather Headboard',
-      category: 'rooms'
+      category: 'rooms' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-6',
       url: DEFAULT_PHOTOS.deluxeSeating,
       title: 'Deluxe Room - Seating Area',
       subtitle: 'Private Seating & Modern Room Amenities',
-      category: 'rooms'
+      category: 'rooms' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-7',
       url: DEFAULT_PHOTOS.deluxeLounge,
       title: 'Deluxe Room - Corner Lounge & Vanity',
       subtitle: 'Work Desk & Hygienic Bath Vanity Access',
-      category: 'rooms'
+      category: 'rooms' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-8',
       url: DEFAULT_PHOTOS.familySuite,
       title: 'Family Suite - Main Bedroom Layout',
       subtitle: 'Dual Beds for Group & Family Devotees',
-      category: 'rooms'
+      category: 'rooms' as const,
+      propertyId: 'hotel' as const
     },
     {
+      id: 'def-9',
       url: DEFAULT_PHOTOS.familySuiteTV,
       title: 'Family Suite - Entertainment & Daybed Lounge',
       subtitle: 'Smart TV Unit, Leather Daybed & Lounge Space',
-      category: 'rooms'
+      category: 'rooms' as const,
+      propertyId: 'hotel' as const
     }
   ];
 
-  // Convert dynamic managed images to gallery format if present
-  const galleryItems = dynamicImages.length > 0
-    ? dynamicImages.map(img => {
-        let cat: 'hotel' | 'guesthouse' | 'rooms' = 'hotel';
-        if (img.roomId === 'deluxe' || img.roomId === 'family' || img.category.includes('Room') || img.category.includes('Suite')) {
-          cat = 'rooms';
-        } else if (img.category.toLowerCase().includes('guest') || img.category.toLowerCase().includes('sbm 2')) {
-          cat = 'guesthouse';
-        }
-        return {
-          url: img.imageUrl,
-          title: img.title || img.category,
-          subtitle: img.description || `${img.category} at SBM Hotel`,
-          category: cat
-        };
-      })
-    : defaultGalleryItems;
+  const galleryItems = [...formattedDynamic, ...defaultGalleryItems];
 
   const filteredItems = selectedCategory === 'all'
     ? galleryItems
-    : galleryItems.filter(item => item.category === selectedCategory);
+    : selectedCategory === 'hotel'
+    ? galleryItems.filter(item => item.propertyId === 'hotel' || item.category === 'hotel')
+    : selectedCategory === 'guesthouse'
+    ? galleryItems.filter(item => item.propertyId === 'guesthouse' || item.category === 'guesthouse')
+    : galleryItems.filter(item => item.category === 'rooms');
 
   return (
     <section className="bg-[#FDFCFB] border-y border-[#C5A059]/15 py-16">

@@ -489,7 +489,9 @@ export type GalleryCategory =
   | 'Facilities'
   | 'Food'
   | 'Temple Surroundings'
-  | 'Location';
+  | 'Location'
+  | 'Rooms & Interiors'
+  | 'rooms-interiors';
 
 export interface ManagedImage {
   id: string;
@@ -502,6 +504,7 @@ export interface ManagedImage {
   displayOrder: number;
   isPrimaryCover?: boolean;
   isMainForRoom?: boolean;
+  status?: 'active' | 'inactive';
   createdAt: string;
   updatedAt: string;
 }

@@ -3205,7 +3205,7 @@ if (updates.price !== undefined) {
   }
 
   // --- IMAGE MANAGEMENT ---
-  public getManagedImages(filters?: { category?: string; roomId?: string; propertyId?: string }): ManagedImage[] {
+  public getManagedImages(filters?: { category?: string; roomId?: string; propertyId?: string; status?: string; includeInactive?: boolean }): ManagedImage[] {
     if (!this.data.managed_images) {
       this.data.managed_images = getInitialManagedImages(new Date().toISOString());
     }
@@ -3222,7 +3222,11 @@ if (updates.price !== undefined) {
           url = DEFAULT_PHOTOS.sbmHotelExterior;
         }
       }
-      return { ...img, imageUrl: url };
+      return {
+        ...img,
+        imageUrl: url,
+        status: img.status || 'active'
+      };
     });
 
     let list = [...this.data.managed_images];
@@ -3232,10 +3236,29 @@ if (updates.price !== undefined) {
         list = list.filter(img => img.roomId === filters.roomId || (filters.roomId === 'deluxe' && img.category === 'Deluxe Room') || (filters.roomId === 'family' && img.category === 'Family Suite'));
       }
       if (filters.category && filters.category !== 'all') {
-        list = list.filter(img => img.category === filters.category);
+        const cat = filters.category.toLowerCase();
+        if (cat === 'rooms-interiors' || cat === 'rooms & interiors' || cat === 'rooms') {
+          list = list.filter(img =>
+            img.category === 'Rooms & Interiors' ||
+            img.category === 'rooms-interiors' ||
+            img.category === 'rooms' ||
+            img.roomId === 'deluxe' ||
+            img.roomId === 'family' ||
+            img.category === 'Deluxe Room' ||
+            img.category === 'Family Suite'
+          );
+        } else {
+          list = list.filter(img => img.category === filters.category);
+        }
       }
       if (filters.propertyId && filters.propertyId !== 'all') {
         list = list.filter(img => !img.propertyId || img.propertyId === filters.propertyId);
+      }
+      if (filters.status && filters.status !== 'all') {
+        list = list.filter(img => (img.status || 'active') === filters.status);
+      }
+      if (filters.includeInactive === false) {
+        list = list.filter(img => (img.status || 'active') === 'active');
       }
     }
 
@@ -3304,6 +3327,7 @@ if (updates.price !== undefined) {
       imageUrl: cleanUrl,
       id,
       displayOrder,
+      status: imageData.status || 'active',
       isPrimaryCover: isPrimary,
       isMainForRoom: isPrimary,
       createdAt: now,
@@ -3346,6 +3370,7 @@ if (updates.price !== undefined) {
     const updated: ManagedImage = {
       ...existing,
       ...updates,
+      status: updates.status !== undefined ? updates.status : (existing.status || 'active'),
       isPrimaryCover: isPrimary !== undefined ? Boolean(isPrimary) : existing.isPrimaryCover,
       isMainForRoom: isPrimary !== undefined ? Boolean(isPrimary) : existing.isMainForRoom,
       updatedAt: new Date().toISOString()

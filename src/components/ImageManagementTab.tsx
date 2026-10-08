@@ -48,10 +48,15 @@ export const ImageManagementTab: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Active navigation view inside Image Management: Rooms, Gallery, Property Cover Images, or About Page
-  const [mainView, setMainView] = useState<'rooms' | 'gallery' | 'property-covers' | 'about-page'>('rooms');
+  // Active navigation view inside Image Management: Rooms, Gallery, Rooms & Interiors, Property Cover Images, or About Page
+  const [mainView, setMainView] = useState<'rooms' | 'gallery' | 'interiors' | 'property-covers' | 'about-page'>('interiors');
   const [selectedRoomForGallery, setSelectedRoomForGallery] = useState<'deluxe' | 'family' | null>(null);
   const [galleryCategoryFilter, setGalleryCategoryFilter] = useState<string>('all');
+
+  // Interior Images Filter state
+  const [interiorPropertyFilter, setInteriorPropertyFilter] = useState<string>('all');
+  const [interiorStatusFilter, setInteriorStatusFilter] = useState<string>('all');
+  const [interiorSearchQuery, setInteriorSearchQuery] = useState<string>('');
 
   // Dedicated About Page Image Modal
   const [aboutModalProperty, setAboutModalProperty] = useState<'sbm-hotel' | 'sbm-guest-house' | null>(null);
@@ -243,6 +248,48 @@ export const ImageManagementTab: React.FC = () => {
   const filteredHotelGallery = galleryCategoryFilter === 'all'
     ? hotelGalleryImages
     : hotelGalleryImages.filter(img => img.category === galleryCategoryFilter);
+
+  // 5. Rooms & Interiors Images
+  const interiorImages = (images || []).filter(
+    img => img.category === 'Rooms & Interiors' ||
+           img.category === 'rooms-interiors' ||
+           img.category === 'rooms' ||
+           img.roomId === 'deluxe' ||
+           img.roomId === 'family' ||
+           img.category === 'Deluxe Room' ||
+           img.category === 'Family Suite'
+  );
+
+  const filteredInteriorImages = interiorImages.filter(img => {
+    if (interiorPropertyFilter !== 'all') {
+      const isGH = img.propertyId === 'sbm-guest-house' || img.propertyId === 'prop-sbm-guesthouse';
+      if (interiorPropertyFilter === 'sbm-hotel' && isGH) return false;
+      if (interiorPropertyFilter === 'sbm-guest-house' && !isGH) return false;
+    }
+    if (interiorStatusFilter !== 'all') {
+      const st = img.status || 'active';
+      if (interiorStatusFilter !== st) return false;
+    }
+    if (interiorSearchQuery.trim()) {
+      const q = interiorSearchQuery.toLowerCase();
+      const matchTitle = (img.title || '').toLowerCase().includes(q);
+      const matchDesc = (img.description || '').toLowerCase().includes(q);
+      const matchCat = (img.category || '').toLowerCase().includes(q);
+      if (!matchTitle && !matchDesc && !matchCat) return false;
+    }
+    return true;
+  });
+
+  const handleToggleStatus = async (img: ManagedImage) => {
+    const nextStatus = (img.status || 'active') === 'active' ? 'inactive' : 'active';
+    try {
+      await api.updateImage(token, img.id, { status: nextStatus });
+      showNotification('success', `Image '${img.title || img.category}' status set to ${nextStatus.toUpperCase()}.`);
+      fetchImages();
+    } catch (err: any) {
+      showNotification('error', err?.message || 'Failed to update image status.');
+    }
+  };
 
   // Handlers for File Selection
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -486,6 +533,18 @@ export const ImageManagementTab: React.FC = () => {
     setIsUploadModalOpen(true);
   };
 
+  const openUploadForInteriors = () => {
+    setUploadTargetRoom('none');
+    setUploadTargetCategory('Rooms & Interiors');
+    setUploadTargetProperty('sbm-hotel');
+    setUploadIsPrimary(false);
+    setUploadTitle('');
+    setUploadDescription('');
+    setSelectedFiles([]);
+    setUploadUrlInput('');
+    setIsUploadModalOpen(true);
+  };
+
   const openUploadForPropertyCover = (propertyCode: 'sbm-hotel' | 'sbm-guest-house' = 'sbm-hotel') => {
     setUploadTargetRoom('none');
     setUploadTargetCategory('Property Cover');
@@ -595,6 +654,22 @@ export const ImageManagementTab: React.FC = () => {
         >
           <Layers className="w-4 h-4 text-[#C5A059]" />
           ROOM IMAGES ({deluxeImages.length + familyImages.length})
+        </button>
+
+        <button
+          id="nav-interior-images-tab"
+          onClick={() => {
+            setMainView('interiors');
+            setSelectedRoomForGallery(null);
+          }}
+          className={`pb-3 text-xs font-bold uppercase tracking-wider transition-all relative cursor-pointer flex items-center gap-2 ${
+            mainView === 'interiors'
+              ? 'text-[#1A1A1A] border-b-2 border-[#C5A059]'
+              : 'text-stone-500 hover:text-stone-800'
+          }`}
+        >
+          <FolderOpen className="w-4 h-4 text-[#C5A059]" />
+          ROOMS & INTERIORS ({interiorImages.length})
         </button>
 
         <button
@@ -1221,6 +1296,217 @@ export const ImageManagementTab: React.FC = () => {
                           onClick={() => openReplaceModal(img)}
                           className="p-1 text-stone-600 hover:text-[#1A1A1A] hover:bg-stone-200 transition-colors cursor-pointer"
                           title="Replace / Edit"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => setDeletingImage(img)}
+                          className="p-1 text-rose-600 hover:text-rose-800 hover:bg-rose-50 transition-colors cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* MAIN VIEW: ROOMS & INTERIORS */}
+      {!loading && !error && mainView === 'interiors' && (
+        <div id="view-rooms-interiors" className="space-y-6">
+          {/* Header & Controls Bar */}
+          <div className="bg-white border border-stone-200 p-5 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <h3 className="text-base font-serif font-semibold text-[#1A1A1A] flex items-center gap-2">
+                  <FolderOpen className="w-5 h-5 text-[#C5A059]" />
+                  Rooms & Interiors / Interior Images
+                </h3>
+                <p className="text-xs text-stone-500 mt-1">
+                  Upload and manage interior photos, hotel rooms, bedrooms, restaurant, dining area, lobby, reception, corridors, and facilities. Active images automatically appear on the public website's <strong>About &rarr; Rooms & Interiors</strong> gallery.
+                </p>
+              </div>
+
+              <button
+                id="btn-upload-interior-image"
+                onClick={openUploadForInteriors}
+                className="px-4 py-2.5 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#C5A059] text-white transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+              >
+                <Plus className="w-4 h-4 text-[#C5A059]" />
+                + Upload Interior Image
+              </button>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-stone-100">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Property Filter */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-stone-500 font-medium">Property:</span>
+                  <select
+                    value={interiorPropertyFilter}
+                    onChange={(e) => setInteriorPropertyFilter(e.target.value)}
+                    className="bg-stone-50 border border-stone-200 px-2.5 py-1 text-xs text-stone-800 focus:outline-none focus:border-[#C5A059]"
+                  >
+                    <option value="all">All Properties ({interiorImages.length})</option>
+                    <option value="sbm-hotel">SBM Hotel</option>
+                    <option value="sbm-guest-house">SBM 2 Guest House</option>
+                  </select>
+                </div>
+
+                {/* Status Filter */}
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-stone-500 font-medium">Status:</span>
+                  <select
+                    value={interiorStatusFilter}
+                    onChange={(e) => setInteriorStatusFilter(e.target.value)}
+                    className="bg-stone-50 border border-stone-200 px-2.5 py-1 text-xs text-stone-800 focus:outline-none focus:border-[#C5A059]"
+                  >
+                    <option value="all">All Statuses</option>
+                    <option value="active">Active Only</option>
+                    <option value="inactive">Inactive Only</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Search Bar */}
+              <div className="w-full sm:w-64">
+                <input
+                  type="text"
+                  placeholder="Search interior title or description..."
+                  value={interiorSearchQuery}
+                  onChange={(e) => setInteriorSearchQuery(e.target.value)}
+                  className="w-full bg-stone-50 border border-stone-200 px-3 py-1.5 text-xs text-stone-800 focus:outline-none focus:border-[#C5A059]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Interior Images Cards Grid */}
+          {filteredInteriorImages.length === 0 ? (
+            <div className="bg-white border border-stone-200 p-12 text-center space-y-3">
+              <ImageIcon className="w-12 h-12 text-stone-300 mx-auto" />
+              <h4 className="text-sm font-semibold text-stone-700">
+                No interior images found
+              </h4>
+              <p className="text-xs text-stone-500 max-w-md mx-auto">
+                Upload room, restaurant, dining area, lobby, reception, corridor, and bathroom photos to feature them in the public Rooms & Interiors gallery.
+              </p>
+              <button
+                onClick={openUploadForInteriors}
+                className="px-4 py-2 text-xs font-semibold bg-[#C5A059] text-white hover:bg-[#b08e4d] transition-colors cursor-pointer"
+              >
+                + Upload First Interior Image
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              {filteredInteriorImages.map((img, index) => {
+                const isActive = (img.status || 'active') === 'active';
+                const isGH = img.propertyId === 'sbm-guest-house' || img.propertyId === 'prop-sbm-guesthouse';
+
+                return (
+                  <div
+                    key={img.id}
+                    className={`bg-white border transition-all overflow-hidden flex flex-col justify-between shadow-sm ${
+                      isActive ? 'border-stone-200 hover:border-stone-300' : 'border-stone-200 opacity-75 bg-stone-50/80'
+                    }`}
+                  >
+                    {/* Thumbnail */}
+                    <div className="relative h-48 bg-stone-100 overflow-hidden group">
+                      <img
+                        src={img.imageUrl}
+                        alt={img.title || 'Interior photo'}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+
+                      {/* Badges */}
+                      <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
+                        <span className="bg-[#1A1A1A]/90 text-[#C5A059] border border-[#C5A059]/40 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 backdrop-blur-sm self-start">
+                          Rooms & Interiors
+                        </span>
+                        <span className="bg-stone-900/80 text-stone-300 border border-stone-700/50 text-[9px] font-medium px-2 py-0.5 backdrop-blur-sm self-start">
+                          {isGH ? 'SBM 2 Guest House' : 'SBM Hotel'}
+                        </span>
+                        <span
+                          className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 backdrop-blur-sm self-start shadow-sm border ${
+                            isActive
+                              ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
+                              : 'bg-rose-950/90 text-rose-300 border-rose-500/50'
+                          }`}
+                        >
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </div>
+
+                      {/* Zoom Button */}
+                      <button
+                        onClick={() => setPreviewImage(img)}
+                        className="absolute top-2 right-2 bg-black/60 hover:bg-black/90 text-white p-1.5 transition-opacity opacity-0 group-hover:opacity-100 z-10 cursor-pointer"
+                        title="View Fullscreen"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    {/* Metadata */}
+                    <div className="p-3.5 space-y-1 flex-1">
+                      <h4 className="text-xs font-semibold text-[#1A1A1A] line-clamp-1">
+                        {img.title || img.category || 'Interior Image'}
+                      </h4>
+                      {img.description && (
+                        <p className="text-[11px] text-stone-500 line-clamp-2 leading-relaxed">
+                          {img.description}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Action Bar */}
+                    <div className="p-2.5 bg-stone-50 border-t border-stone-100 flex items-center justify-between gap-1 text-xs">
+                      {/* Reorder buttons */}
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleMoveOrder(filteredInteriorImages, index, 'left')}
+                          disabled={index === 0}
+                          className="p-1 border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                          title="Move Left"
+                        >
+                          <MoveLeft className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => handleMoveOrder(filteredInteriorImages, index, 'right')}
+                          disabled={index === filteredInteriorImages.length - 1}
+                          className="p-1 border border-stone-200 bg-white hover:bg-stone-100 text-stone-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                          title="Move Right"
+                        >
+                          <MoveRight className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {/* Enable / Disable Status Toggle */}
+                        <button
+                          onClick={() => handleToggleStatus(img)}
+                          className={`px-2 py-1 text-[10px] font-bold uppercase transition-all border cursor-pointer ${
+                            isActive
+                              ? 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                          }`}
+                          title={isActive ? 'Disable / Hide from public gallery' : 'Enable / Show in public gallery'}
+                        >
+                          {isActive ? 'Disable' : 'Enable'}
+                        </button>
+
+                        <button
+                          onClick={() => openReplaceModal(img)}
+                          className="p-1 text-stone-600 hover:text-[#1A1A1A] hover:bg-stone-200 transition-colors cursor-pointer"
+                          title="Edit Details / Replace File"
                         >
                           <Edit3 className="w-3.5 h-3.5" />
                         </button>
@@ -2071,6 +2357,8 @@ export const ImageManagementTab: React.FC = () => {
                       ? uploadTargetProperty === 'sbm-guest-house'
                         ? 'property-sbm-guest-house'
                         : 'property-sbm-hotel'
+                      : uploadTargetCategory === 'Rooms & Interiors'
+                      ? 'rooms-interiors'
                       : uploadTargetRoom
                   }
                   onChange={(e) => {
@@ -2083,6 +2371,11 @@ export const ImageManagementTab: React.FC = () => {
                       setUploadTargetRoom('family');
                       setUploadTargetCategory('Family Suite');
                       setUploadTargetProperty('sbm-hotel');
+                    } else if (val === 'rooms-interiors') {
+                      setUploadTargetRoom('none');
+                      setUploadTargetCategory('Rooms & Interiors');
+                      setUploadTargetProperty('sbm-hotel');
+                      setUploadIsPrimary(false);
                     } else if (val === 'property-sbm-hotel') {
                       setUploadTargetRoom('none');
                       setUploadTargetCategory('Property Cover');
@@ -2102,6 +2395,9 @@ export const ImageManagementTab: React.FC = () => {
                   }}
                   className="w-full text-xs p-2.5 border border-stone-300 focus:border-[#C5A059] outline-none bg-white"
                 >
+                  <optgroup label="Rooms & Interiors Gallery">
+                    <option value="rooms-interiors">Rooms & Interiors (Bedrooms, Dining, Lobby, Facilities)</option>
+                  </optgroup>
                   <optgroup label="Room Categories (Public Website)">
                     <option value="deluxe">Room: Deluxe Room (Public Category)</option>
                     <option value="family">Room: Family Suite (Public Category)</option>

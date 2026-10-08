@@ -1927,7 +1927,8 @@ res.json({
       const images = db.getManagedImages({
         category: category as string,
         roomId: roomId as string,
-        propertyId: propertyId as string
+        propertyId: propertyId as string,
+        includeInactive: false
       });
       res.json(images);
     } catch (err: any) {
@@ -1937,11 +1938,13 @@ res.json({
 
   app.get('/api/admin/images', authenticateAdmin, (req, res) => {
     try {
-      const { category, roomId, propertyId } = req.query;
+      const { category, roomId, propertyId, status } = req.query;
       const images = db.getManagedImages({
         category: category as string,
         roomId: roomId as string,
-        propertyId: propertyId as string
+        propertyId: propertyId as string,
+        status: status as string,
+        includeInactive: true
       });
       res.json(images);
     } catch (err: any) {
