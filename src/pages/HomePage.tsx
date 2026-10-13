@@ -28,6 +28,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectRoomToBook, onNaviga
   }, []);
 
   const handleSearch = async (query: AvailabilitySearchQuery) => {
+    if (loadingSearch) return;
     setLoadingSearch(true);
     setSearchError(null);
     setSearchParams({
@@ -42,11 +43,13 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectRoomToBook, onNaviga
       const results = await api.checkAvailability(query);
       setSearchResults(results);
 
-      // Smooth scroll to results
-      const resultsEl = document.getElementById('availability-results-section');
-      if (resultsEl) {
-        resultsEl.scrollIntoView({ behavior: 'smooth' });
-      }
+      // Ensure DOM has mounted the results section before scrolling on first click
+      requestAnimationFrame(() => {
+        const resultsEl = document.getElementById('availability-results-section');
+        if (resultsEl) {
+          resultsEl.scrollIntoView({ behavior: 'smooth' });
+        }
+      });
     } catch (err: any) {
       setSearchError(err.message || 'Failed to check room availability.');
     } finally {

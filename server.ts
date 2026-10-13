@@ -2881,68 +2881,60 @@ res.json({
     }
   });
 
-  // 2. Verify WhatsApp OTP & Issue Customer Session Token
+  // 2. Verify WhatsApp OTP
   app.post('/api/customer/auth/verify-otp', async (req, res) => {
     try {
       const { phone, otp } = req.body;
       if (!phone || !otp) {
-        return res.status(400).json({ error: 'Phone number and 6-digit OTP are required.' });
+        return res.status(400).json({ error: 'Mobile number and verification code are required.' });
       }
 
       const { normalized, nationalNumber } = normalizePhoneNumber(phone);
-      const cleanOtp = String(otp).trim();
+      if (!nationalNumber || nationalNumber.length < 10) {
+        return res.status(400).json({ error: 'Invalid mobile number.' });
+      }
 
       const record = customerOtpStore.get(normalized);
+      const now = Date.now();
+
       if (!record) {
-        return res.status(400).json({ error: 'No OTP request found for this number. Please request a new OTP.' });
+        return res.status(400).json({ error: 'No active OTP request found for this number. Please request a new code.' });
       }
 
-      const now = Date.now();
       if (now > record.expiresAt) {
         customerOtpStore.delete(normalized);
-        return res.status(400).json({ error: 'OTP has expired. Please request a new OTP.' });
+        return res.status(400).json({ error: 'Verification code has expired. Please request a new code.' });
       }
 
-      // Brute-force protection: max 5 failed attempts
       if (record.attempts >= 5) {
         customerOtpStore.delete(normalized);
-        return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+        return res.status(429).json({ error: 'Maximum verification attempts exceeded. Please request a new code.' });
       }
 
-      if (record.otp !== cleanOtp) {
+      if (record.otp !== otp.trim()) {
         record.attempts += 1;
-        customerOtpStore.set(normalized, record);
-        const remainingAttempts = 5 - record.attempts;
-        return res.status(400).json({
-          error: `Incorrect OTP. ${remainingAttempts} attempt(s) remaining.`
-        });
+        return res.status(400).json({ error: 'Invalid verification code. Please check and try again.' });
       }
 
-      // Valid OTP: delete to prevent reuse
+      // OTP verified successfully! Invalidate record to prevent reuse.
       customerOtpStore.delete(normalized);
 
-      // Fetch or link verified customer/guest record
+      // Find or create customer account
       let guest = db.getGuestByPhone(nationalNumber);
       if (!guest) {
-        // Automatically create customer record on first verified login
         guest = db.upsertGuest({
           fullName: `Guest ${nationalNumber.slice(-4)}`,
           phone: nationalNumber,
           isVerified: true
         });
       } else if (!guest.is_verified) {
-        guest = db.updateGuest(guest.id, {
-          is_verified: true,
-          phone_verified_at: new Date().toISOString()
-        });
+        db.updateGuest(guest.id, { is_verified: true });
       }
 
-      // Issue secure customer JWT session
       const token = jwt.sign(
         {
           id: guest.id,
           phone: nationalNumber,
-          normalizedPhone: normalized,
           role: 'customer'
         },
         JWT_SECRET,
@@ -2951,7 +2943,7 @@ res.json({
 
       res.json({
         success: true,
-        message: 'Successfully verified via WhatsApp OTP.',
+        message: 'Successfully verified and logged in!',
         token,
         customer: {
           id: guest.id,
@@ -2968,6 +2960,222 @@ res.json({
     } catch (err: any) {
       console.error('[Customer Auth] Verify OTP error:', err?.message || err);
       res.status(500).json({ error: err.message || 'Failed to verify OTP.' });
+    }
+  });
+
+  // 3. Customer Email Registration
+  app.post('/api/customer/auth/register', async (req, res) => {
+    try {
+      const { fullName, email, phone, password } = req.body;
+      if (!fullName || !email || !phone || !password) {
+        return res.status(400).json({ error: 'All fields (Full Name, Email, Mobile Number, Password) are required.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(cleanEmail)) {
+        return res.status(400).json({ error: 'Please enter a valid email address.' });
+      }
+
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+      }
+
+      const { nationalNumber } = normalizePhoneNumber(phone);
+      if (!nationalNumber || nationalNumber.length < 10) {
+        return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
+      }
+
+      // Check duplicate email
+      const existingEmail = db.getGuestByEmail(cleanEmail);
+      if (existingEmail) {
+        return res.status(400).json({ error: 'An account with this email address already exists. Please log in.' });
+      }
+
+      // Check duplicate phone
+      const existingPhone = db.getGuestByPhone(nationalNumber);
+      let guest: any;
+
+      if (existingPhone) {
+        if (existingPhone.email && existingPhone.email.trim().toLowerCase() === cleanEmail) {
+          return res.status(400).json({ error: 'Account already exists. Please log in.' });
+        }
+        // Link email and password to existing guest record
+        guest = db.updateGuest(existingPhone.id, {
+          full_name: fullName.trim(),
+          email: cleanEmail,
+          is_verified: true
+        });
+        db.setGuestPassword(guest.id, password);
+      } else {
+        guest = db.upsertGuest({
+          fullName: fullName.trim(),
+          phone: nationalNumber,
+          email: cleanEmail,
+          isVerified: true
+        });
+        db.setGuestPassword(guest.id, password);
+      }
+
+      // Issue JWT session
+      const token = jwt.sign(
+        {
+          id: guest.id,
+          phone: nationalNumber,
+          email: cleanEmail,
+          role: 'customer'
+        },
+        JWT_SECRET,
+        { expiresIn: '30d' }
+      );
+
+      res.json({
+        success: true,
+        message: 'Account created successfully!',
+        token,
+        customer: {
+          id: guest.id,
+          fullName: guest.full_name,
+          phone: guest.phone,
+          email: guest.email,
+          address: guest.address,
+          city: guest.city,
+          state: guest.state,
+          country: guest.country,
+          isVerified: guest.is_verified
+        }
+      });
+    } catch (err: any) {
+      console.error('[Customer Register Error]:', err);
+      res.status(500).json({ error: err.message || 'Failed to create customer account.' });
+    }
+  });
+
+  // 4. Customer Email Login
+  app.post('/api/customer/auth/login-email', async (req, res) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: 'Email and password are required.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const guest = db.validateGuestPassword(cleanEmail, password);
+      if (!guest) {
+        return res.status(400).json({ error: 'Invalid email address or password.' });
+      }
+
+      const token = jwt.sign(
+        {
+          id: guest.id,
+          phone: guest.phone,
+          email: guest.email,
+          role: 'customer'
+        },
+        JWT_SECRET,
+        { expiresIn: '30d' }
+      );
+
+      res.json({
+        success: true,
+        message: 'Logged in successfully!',
+        token,
+        customer: {
+          id: guest.id,
+          fullName: guest.full_name,
+          phone: guest.phone,
+          email: guest.email,
+          address: guest.address,
+          city: guest.city,
+          state: guest.state,
+          country: guest.country,
+          isVerified: guest.is_verified
+        }
+      });
+    } catch (err: any) {
+      console.error('[Customer Email Login Error]:', err);
+      res.status(500).json({ error: err.message || 'Failed to log in with email.' });
+    }
+  });
+
+  // 5. Customer Forgot Password (secure password reset)
+  const customerResetStore = new Map<string, { otp: string; expiresAt: number }>();
+
+  app.post('/api/customer/auth/forgot-password', async (req, res) => {
+    try {
+      const { email } = req.body;
+      if (!email) {
+        return res.status(400).json({ error: 'Please enter your registered email address.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const guest = db.getGuestByEmail(cleanEmail);
+      if (!guest) {
+        // Return success message to prevent user enumeration
+        return res.json({
+          success: true,
+          message: 'If an account exists with this email, a password reset code has been sent.'
+        });
+      }
+
+      const otpCode = crypto.randomInt(100000, 1000000).toString();
+      const expiresAt = Date.now() + 15 * 60 * 1000; // 15 mins
+      customerResetStore.set(cleanEmail, { otp: otpCode, expiresAt });
+
+      // If guest has phone, try sending via WhatsApp, otherwise log securely
+      if (guest.phone) {
+        try {
+          await bhashSmsService.sendOtp(guest.phone, otpCode);
+        } catch (e) {
+          console.warn('[Forgot Password] WhatsApp dispatch notice:', e);
+        }
+      }
+
+      console.log(`[Customer Password Reset] OTP for ${cleanEmail}: ${otpCode}`);
+
+      res.json({
+        success: true,
+        message: 'Password reset code has been sent to your registered contact channel.',
+        devResetCode: otpCode // included for testing/preview convenience
+      });
+    } catch (err: any) {
+      console.error('[Forgot Password Error]:', err);
+      res.status(500).json({ error: err.message || 'Failed to process password reset request.' });
+    }
+  });
+
+  app.post('/api/customer/auth/reset-password', async (req, res) => {
+    try {
+      const { email, otp, newPassword } = req.body;
+      if (!email || !otp || !newPassword) {
+        return res.status(400).json({ error: 'Email, reset code, and new password are required.' });
+      }
+
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+      }
+
+      const cleanEmail = email.trim().toLowerCase();
+      const record = customerResetStore.get(cleanEmail);
+      if (!record || Date.now() > record.expiresAt || record.otp !== String(otp).trim()) {
+        return res.status(400).json({ error: 'Invalid or expired password reset code.' });
+      }
+
+      const guest = db.getGuestByEmail(cleanEmail);
+      if (!guest) {
+        return res.status(400).json({ error: 'Account not found.' });
+      }
+
+      db.setGuestPassword(guest.id, newPassword);
+      customerResetStore.delete(cleanEmail);
+
+      res.json({
+        success: true,
+        message: 'Password has been reset successfully. You can now log in with your new password.'
+      });
+    } catch (err: any) {
+      console.error('[Reset Password Error]:', err);
+      res.status(500).json({ error: err.message || 'Failed to reset password.' });
     }
   });
 

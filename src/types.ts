@@ -134,6 +134,7 @@ export interface Guest {
   id_number?: string;
   is_verified?: boolean;
   phone_verified_at?: string;
+  password_hash?: string;
   total_bookings?: number;
   total_spent?: number;
   last_stay?: string;

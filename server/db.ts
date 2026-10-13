@@ -1188,26 +1188,29 @@ class DatabaseService {
     const holdPending = this.data.settings.hold_pending_inventory;
     const nowIso = new Date().toISOString();
 
+    // Pre-filter valid bookings, blocks, holds, and restrictions once globally
+    const validBookings = (this.data.bookings || []).filter(b => {
+      if (b.booking_status === 'Cancelled' || b.booking_status === 'No Show') return false;
+      if (b.booking_status === 'Pending' && !holdPending) return false;
+      return true;
+    });
+
+    const validBlocks = this.data.blocked_rooms || [];
+    const validHolds = (this.data.inventory_holds || []).filter((h: any) => {
+      if (h.status && h.status !== 'ACTIVE') return false;
+      if (h.expires_at && h.expires_at <= nowIso) return false;
+      return true;
+    });
+
+    const channelRestrictions = this.data.channel_restrictions || [];
+
     for (const room of targetRooms) {
       const property = this.data.properties.find(p => p.id === room.property_id || p.code === room.property_code);
       if (!property) continue;
 
-      // Pre-filter active records relevant to this room type once
-      const roomBookings = this.data.bookings.filter(b => {
-        if (b.room_type_id !== room.id) return false;
-        if (b.booking_status === 'Cancelled' || b.booking_status === 'No Show') return false;
-        if (b.booking_status === 'Pending' && !holdPending) return false;
-        return true;
-      });
-
-      const roomBlocks = (this.data.blocked_rooms || []).filter(blk => blk.room_type_id === room.id);
-
-      const roomHolds = (this.data.inventory_holds || []).filter((h: any) => {
-        if (h.room_type_id !== room.id && h.room_type_id !== room.room_code) return false;
-        if (h.status && h.status !== 'ACTIVE') return false;
-        if (h.expires_at && h.expires_at <= nowIso) return false;
-        return true;
-      });
+      const roomBookings = validBookings.filter(b => b.room_type_id === room.id);
+      const roomBlocks = validBlocks.filter(blk => blk.room_type_id === room.id);
+      const roomHolds = validHolds.filter((h: any) => h.room_type_id === room.id || h.room_type_id === room.room_code);
 
       // Find max occupancy for any night in stay
       let maxOccupied = 0;
@@ -1233,8 +1236,8 @@ class DatabaseService {
 
       // Check Channel Restrictions for DIRECT / ALL channels
       let isRestricted = false;
-      if (this.data.channel_restrictions && this.data.channel_restrictions.length > 0) {
-        const applicableRestrictions = this.data.channel_restrictions.filter(
+      if (channelRestrictions.length > 0) {
+        const applicableRestrictions = channelRestrictions.filter(
           r => (r.property_code === room.property_code || r.property_code === property.code) &&
                (r.room_type_id === room.id || r.room_type_id === room.room_code || r.room_type_id === 'all') &&
                (r.channel_code === 'ALL' || r.channel_code === 'DIRECT' || !r.channel_code)
@@ -2570,6 +2573,31 @@ if (updates.price !== undefined) {
     }
 
     return null;
+  }
+
+  public getGuestByEmail(email: string): Guest | null {
+    if (!this.data.guests) this.data.guests = [];
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return null;
+    return this.data.guests.find(g => g.email && g.email.trim().toLowerCase() === cleanEmail) || null;
+  }
+
+  public setGuestPassword(guestId: string, plainPassword: string): void {
+    if (!this.data.guests) this.data.guests = [];
+    const guest = this.data.guests.find(g => g.id === guestId);
+    if (!guest) throw new Error('Guest not found');
+    const salt = bcrypt.genSaltSync(10);
+    guest.password_hash = bcrypt.hashSync(plainPassword, salt);
+    guest.updated_at = new Date().toISOString();
+    this.save();
+  }
+
+  public validateGuestPassword(email: string, plainPassword: string): Guest | null {
+    const guest = this.getGuestByEmail(email);
+    if (!guest || !guest.password_hash) return null;
+    const isValid = bcrypt.compareSync(plainPassword, guest.password_hash);
+    if (!isValid) return null;
+    return guest;
   }
 
   public getCustomerBookings(phoneOrId: string): Booking[] {

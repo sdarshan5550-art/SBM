@@ -42,9 +42,26 @@ interface MyAccountPageProps {
 export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal }) => {
   // Authentication states
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(Boolean(getCustomerToken()));
+  const [authMainTab, setAuthMainTab] = useState<'signin' | 'register' | 'mobile_otp'>('signin');
+  const [signInSubTab, setSignInSubTab] = useState<'mobile' | 'email'>('mobile');
+  const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [emailAuthMode, setEmailAuthMode] = useState<'login' | 'forgot'>('login');
+
   const [phoneInput, setPhoneInput] = useState('');
   const [otpInput, setOtpInput] = useState('');
   const [step, setStep] = useState<'phone' | 'otp'>('phone');
+
+  // Email auth inputs
+  const [emailInput, setEmailInput] = useState('');
+  const [passwordInput, setPasswordInput] = useState('');
+  const [regFullName, setRegFullName] = useState('');
+  const [regEmail, setRegEmail] = useState('');
+  const [regPhone, setRegPhone] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [resetCode, setResetCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [forgotStep, setForgotStep] = useState<'request' | 'verify'>('request');
   
   // UI feedback & timers
   const [loading, setLoading] = useState(false);
@@ -125,10 +142,7 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
       setMaskedPhone(res.maskedPhone || phoneInput.trim());
       setStep('otp');
       setCooldown(res.cooldownSeconds || 60);
-      setSuccessMsg(res.message || 'OTP dispatched to your WhatsApp.');
-      if (res.devOtp) {
-        setOtpInput(res.devOtp);
-      }
+      setSuccessMsg(res.message || 'If the request was accepted, a verification code will be sent to your WhatsApp number.');
     } catch (err: any) {
       console.error('[MyAccount] Request OTP error:', err);
       if (err?.notConfigured || err?.message?.includes('unconfigured') || err?.message?.includes('BHASHSMS')) {
@@ -143,8 +157,8 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
   // 2. Verify WhatsApp OTP
   const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!otpInput.trim() || otpInput.trim().length !== 6) {
-      setError('Please enter the 6-digit OTP received on WhatsApp.');
+    if (!otpInput.trim() || otpInput.length !== 6) {
+      setError('Please enter the 6-digit verification code.');
       return;
     }
 
@@ -157,12 +171,150 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
       setCustomerToken(res.token);
       setIsAuthenticated(true);
       setCustomer(res.customer);
-      setSuccessMsg('Logged in successfully!');
-      setStep('phone');
+      setSuccessMsg('Successfully verified and logged in via WhatsApp OTP!');
       setOtpInput('');
     } catch (err: any) {
       console.error('[MyAccount] Verify OTP error:', err);
-      setError(err.message || 'Invalid or expired OTP. Please try again.');
+      setError(err.message || 'Invalid verification code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 3. Email Login
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!emailInput.trim() || !passwordInput) {
+      setError('Please enter both email and password.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await api.customer.loginEmail(emailInput.trim(), passwordInput);
+      setCustomerToken(res.token);
+      setIsAuthenticated(true);
+      setCustomer(res.customer);
+      setSuccessMsg('Logged in successfully!');
+      setEmailInput('');
+      setPasswordInput('');
+    } catch (err: any) {
+      console.error('[MyAccount] Email Login error:', err);
+      setError(err.message || 'Invalid email or password.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 4. Customer Registration
+  const handleRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regFullName.trim() || !regEmail.trim() || !regPhone.trim() || !regPassword || !regConfirmPassword) {
+      setError('All registration fields (Full Name, Mobile Number, Email Address, Password, Confirm Password) are required.');
+      return;
+    }
+
+    const cleanEmail = regEmail.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    if (regPassword !== regConfirmPassword) {
+      setError('Passwords do not match. Please ensure both password fields are identical.');
+      return;
+    }
+
+    if (regPassword.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await api.customer.register({
+        fullName: regFullName.trim(),
+        email: cleanEmail,
+        phone: regPhone.trim(),
+        password: regPassword
+      });
+      setCustomerToken(res.token);
+      setIsAuthenticated(true);
+      setCustomer(res.customer);
+      setSuccessMsg('Account created successfully! Welcome to SBM Hotel.');
+      setRegFullName('');
+      setRegEmail('');
+      setRegPhone('');
+      setRegPassword('');
+      setRegConfirmPassword('');
+    } catch (err: any) {
+      console.error('[MyAccount] Registration error:', err);
+      setError(err.message || 'Failed to create account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 5. Forgot Password Request
+  const handleForgotPasswordRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!forgotEmail.trim()) {
+      setError('Please enter your registered email address.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await api.customer.forgotPassword(forgotEmail.trim());
+      setSuccessMsg(res.message || 'Password reset code sent.');
+      setForgotStep('verify');
+      if (res.devResetCode) {
+        setResetCode(res.devResetCode);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to process password reset request.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 6. Reset Password Submit
+  const handleResetPasswordSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetCode.trim() || !newPassword) {
+      setError('Please enter the reset code and your new password.');
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setError('New password must be at least 6 characters long.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await api.customer.resetPassword(forgotEmail.trim(), resetCode.trim(), newPassword);
+      setSuccessMsg(res.message || 'Password reset successfully! You can now log in.');
+      setEmailAuthMode('login');
+      setForgotStep('request');
+      setForgotEmail('');
+      setResetCode('');
+      setNewPassword('');
+    } catch (err: any) {
+      setError(err.message || 'Failed to reset password.');
     } finally {
       setLoading(false);
     }
@@ -240,115 +392,519 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
         </div>
       )}
 
-      {/* VIEW 1: LOGIN FLOW VIA WHATSAPP OTP */}
+      {/* UNAUTHENTICATED VIEW: THREE CLEAR OPTIONS */}
       {!isAuthenticated ? (
         <div className="max-w-md mx-auto bg-white border border-[#C5A059]/20 p-6 sm:p-8 shadow-sm space-y-6">
-          <div className="text-center space-y-2">
-            <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
-              <MessageSquare className="w-6 h-6 text-[#25D366]" />
-            </div>
-            <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
-              WhatsApp Login
-            </h2>
-            <p className="text-xs text-[#666666]">
-              {step === 'phone'
-                ? 'Enter your mobile number to receive a secure One-Time Password (OTP) on WhatsApp.'
-                : `Enter the 6-digit OTP sent to ${maskedPhone}.`}
-            </p>
+          {/* Three Clear Options Header */}
+          <div className="grid grid-cols-3 p-1 bg-stone-100 rounded-lg border border-stone-200 text-xs font-semibold text-center gap-1">
+            <button
+              type="button"
+              onClick={() => { setAuthMainTab('signin'); setError(null); setSuccessMsg(null); }}
+              className={`py-2 px-1 rounded-md transition-all cursor-pointer ${authMainTab === 'signin' ? 'bg-[#1A1A1A] text-white shadow-xs font-bold' : 'text-stone-700 hover:text-stone-900 bg-white'}`}
+            >
+              Sign In
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMainTab('register'); setError(null); setSuccessMsg(null); }}
+              className={`py-2 px-1 rounded-md transition-all cursor-pointer ${authMainTab === 'register' ? 'bg-[#1A1A1A] text-white shadow-xs font-bold' : 'text-stone-700 hover:text-stone-900 bg-white'}`}
+            >
+              Create Account
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAuthMainTab('mobile_otp'); setError(null); setSuccessMsg(null); }}
+              className={`py-2 px-1 rounded-md transition-all cursor-pointer ${authMainTab === 'mobile_otp' ? 'bg-[#1A1A1A] text-white shadow-xs font-bold' : 'text-stone-700 hover:text-stone-900 bg-white'}`}
+            >
+              WhatsApp OTP
+            </button>
           </div>
 
-          {step === 'phone' ? (
-            <form onSubmit={handleRequestOtp} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                  Mobile Number (India or International)
-                </label>
-                <div className="relative">
+          {/* 1. SIGN IN (MOBILE OTP OR EMAIL) */}
+          {authMainTab === 'signin' && (
+            <div className="space-y-6">
+              {/* Sign In Sub-Tabs */}
+              <div className="flex border-b border-stone-200 pb-2 text-xs font-semibold">
+                <button
+                  type="button"
+                  onClick={() => { setSignInSubTab('mobile'); setError(null); setSuccessMsg(null); }}
+                  className={`flex-1 pb-2 border-b-2 transition-colors cursor-pointer text-center ${signInSubTab === 'mobile' ? 'border-[#C5A059] text-[#1A1A1A] font-bold' : 'border-transparent text-stone-500 hover:text-stone-800'}`}
+                >
+                  Mobile Number (OTP)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setSignInSubTab('email'); setError(null); setSuccessMsg(null); }}
+                  className={`flex-1 pb-2 border-b-2 transition-colors cursor-pointer text-center ${signInSubTab === 'email' ? 'border-[#C5A059] text-[#1A1A1A] font-bold' : 'border-transparent text-stone-500 hover:text-stone-800'}`}
+                >
+                  Email & Password
+                </button>
+              </div>
+
+              {signInSubTab === 'mobile' ? (
+                <div className="space-y-6">
+                  <div className="text-center space-y-2">
+                    <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
+                      <MessageSquare className="w-6 h-6 text-[#25D366]" />
+                    </div>
+                    <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
+                      Sign In with WhatsApp OTP
+                    </h2>
+                    <p className="text-xs text-[#666666]">
+                      {step === 'phone'
+                        ? 'Enter your mobile number to receive a secure One-Time Password (OTP) on WhatsApp.'
+                        : `Enter the 6-digit OTP sent to ${maskedPhone}.`}
+                    </p>
+                  </div>
+
+                  {step === 'phone' ? (
+                    <form onSubmit={handleRequestOtp} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                          Mobile Number
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="tel"
+                            required
+                            placeholder="e.g. 9983567921"
+                            value={phoneInput}
+                            onChange={(e) => setPhoneInput(e.target.value)}
+                            className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                          />
+                          <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
+                        </div>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                      >
+                        <MessageSquare className="w-4 h-4 text-[#25D366]" />
+                        <span>{loading ? 'Requesting OTP...' : 'GET WHATSAPP OTP'}</span>
+                      </button>
+                    </form>
+                  ) : (
+                    <form onSubmit={handleVerifyOtp} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                          6-Digit WhatsApp OTP
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          maxLength={6}
+                          placeholder="123456"
+                          value={otpInput}
+                          onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 px-4 py-3 text-center text-xl font-mono tracking-widest text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                        />
+                        <p className="text-[11px] text-stone-500 mt-1.5 flex items-center justify-between">
+                          <span>Valid for 10 minutes</span>
+                          {cooldown > 0 ? (
+                            <span className="text-[#C5A059] font-medium">Resend in {cooldown}s</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => handleRequestOtp()}
+                              disabled={loading}
+                              className="text-[#C5A059] hover:underline font-semibold cursor-pointer"
+                            >
+                              Resend OTP
+                            </button>
+                          )}
+                        </p>
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading || otpInput.length !== 6}
+                        className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                      >
+                        <ShieldCheck className="w-4 h-4 text-[#C5A059]" />
+                        <span>{loading ? 'Verifying...' : 'VERIFY & SIGN IN'}</span>
+                      </button>
+
+                      <div className="text-center pt-2">
+                        <button
+                          type="button"
+                          onClick={() => { setStep('phone'); setError(null); }}
+                          className="text-xs text-stone-500 hover:text-stone-800 underline cursor-pointer"
+                        >
+                          &larr; Change mobile number
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="text-center space-y-2">
+                    <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
+                      <User className="w-6 h-6 text-[#C5A059]" />
+                    </div>
+                    <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
+                      {emailAuthMode === 'login' ? 'Sign In with Email' : 'Reset Password'}
+                    </h2>
+                    <p className="text-xs text-[#666666]">
+                      {emailAuthMode === 'login'
+                        ? 'Enter your registered email address and password.'
+                        : (forgotStep === 'request' ? 'Enter your registered email to receive a password reset code.' : 'Enter reset code and new password.')}
+                    </p>
+                  </div>
+
+                  {emailAuthMode === 'login' ? (
+                    <form onSubmit={handleEmailLogin} className="space-y-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                          Email Address
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          placeholder="e.g. guest@example.com"
+                          value={emailInput}
+                          onChange={(e) => setEmailInput(e.target.value)}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                        />
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider">
+                            Password
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => { setEmailAuthMode('forgot'); setError(null); setSuccessMsg(null); }}
+                            className="text-[11px] text-[#C5A059] hover:underline font-medium cursor-pointer"
+                          >
+                            Forgot Password?
+                          </button>
+                        </div>
+                        <input
+                          type="password"
+                          required
+                          placeholder="••••••••"
+                          value={passwordInput}
+                          onChange={(e) => setPasswordInput(e.target.value)}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                        />
+                      </div>
+
+                      <button
+                        type="submit"
+                        disabled={loading}
+                        className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                      >
+                        <span>{loading ? 'Signing In...' : 'SIGN IN WITH EMAIL'}</span>
+                      </button>
+
+                      <div className="text-center pt-2">
+                        <p className="text-xs text-stone-600">
+                          New to SBM Hotel?{' '}
+                          <button
+                            type="button"
+                            onClick={() => { setAuthMainTab('register'); setError(null); setSuccessMsg(null); }}
+                            className="text-[#C5A059] font-bold hover:underline cursor-pointer"
+                          >
+                            Create Account
+                          </button>
+                        </p>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="space-y-4">
+                      {forgotStep === 'request' ? (
+                        <form onSubmit={handleForgotPasswordRequest} className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                              Registered Email Address
+                            </label>
+                            <input
+                              type="email"
+                              required
+                              placeholder="e.g. guest@example.com"
+                              value={forgotEmail}
+                              onChange={(e) => setForgotEmail(e.target.value)}
+                              className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                          >
+                            <span>{loading ? 'Sending Code...' : 'SEND RESET CODE'}</span>
+                          </button>
+                          <div className="text-center pt-2">
+                            <button
+                              type="button"
+                              onClick={() => { setEmailAuthMode('login'); setForgotStep('request'); setError(null); setSuccessMsg(null); }}
+                              className="text-xs text-stone-500 hover:text-stone-800 underline cursor-pointer"
+                            >
+                              &larr; Back to Sign In
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <form onSubmit={handleResetPasswordSubmit} className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                              6-Digit Reset Code
+                            </label>
+                            <input
+                              type="text"
+                              required
+                              maxLength={6}
+                              placeholder="123456"
+                              value={resetCode}
+                              onChange={(e) => setResetCode(e.target.value.replace(/\D/g, ''))}
+                              className="w-full bg-[#FDFCFB] border border-stone-200 px-4 py-3 text-center text-xl font-mono tracking-widest text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                              New Password (min 6 characters)
+                            </label>
+                            <input
+                              type="password"
+                              required
+                              minLength={6}
+                              placeholder="••••••••"
+                              value={newPassword}
+                              onChange={(e) => setNewPassword(e.target.value)}
+                              className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                            />
+                          </div>
+                          <button
+                            type="submit"
+                            disabled={loading}
+                            className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                          >
+                            <span>{loading ? 'Resetting...' : 'RESET PASSWORD & LOGIN'}</span>
+                          </button>
+                          <div className="text-center pt-2">
+                            <button
+                              type="button"
+                              onClick={() => { setForgotStep('request'); setError(null); setSuccessMsg(null); }}
+                              className="text-xs text-stone-500 hover:text-stone-800 underline cursor-pointer"
+                            >
+                              &larr; Resend code
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 2. NEW USER? CREATE ACCOUNT */}
+          {authMainTab === 'register' && (
+            <div className="space-y-6">
+              <div className="text-center space-y-2">
+                <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
+                  <User className="w-6 h-6 text-[#C5A059]" />
+                </div>
+                <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
+                  New User? Create Account
+                </h2>
+                <p className="text-xs text-[#666666]">
+                  Register your profile to access booking history across SBM Hotel & Guest House.
+                </p>
+              </div>
+
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Rajesh Sharma"
+                    value={regFullName}
+                    onChange={(e) => setRegFullName(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                    Mobile Number *
+                  </label>
                   <input
                     type="tel"
                     required
-                    placeholder="e.g. 9983567921 or +91 99835 67921"
-                    value={phoneInput}
-                    onChange={(e) => setPhoneInput(e.target.value)}
-                    className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                    placeholder="e.g. 9983567921"
+                    value={regPhone}
+                    onChange={(e) => setRegPhone(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
                   />
-                  <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
                 </div>
-                <p className="text-[11px] text-stone-500 mt-1">
-                  10-digit Indian numbers automatically format with +91 country code.
-                </p>
-              </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
-              >
-                <MessageSquare className="w-4 h-4 text-[#25D366]" />
-                <span>{loading ? 'Requesting OTP...' : 'GET WHATSAPP OTP'}</span>
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleVerifyOtp} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                  6-Digit WhatsApp OTP
-                </label>
-                <input
-                  type="text"
-                  required
-                  maxLength={6}
-                  placeholder="123456"
-                  value={otpInput}
-                  onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
-                  className="w-full bg-[#FDFCFB] border border-stone-200 px-4 py-3 text-center text-xl font-mono tracking-widest text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
-                />
-                <p className="text-[11px] text-stone-500 mt-1.5 flex items-center justify-between">
-                  <span>Valid for 10 minutes</span>
-                  {cooldown > 0 ? (
-                    <span className="text-[#C5A059] font-medium">Resend in {cooldown}s</span>
-                  ) : (
+                <div>
+                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                    Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    placeholder="e.g. rajesh@example.com"
+                    value={regEmail}
+                    onChange={(e) => setRegEmail(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                    Password * (min 6 characters)
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    placeholder="••••••••"
+                    value={regPassword}
+                    onChange={(e) => setRegPassword(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                    Confirm Password *
+                  </label>
+                  <input
+                    type="password"
+                    required
+                    minLength={6}
+                    placeholder="••••••••"
+                    value={regConfirmPassword}
+                    onChange={(e) => setRegConfirmPassword(e.target.value)}
+                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                >
+                  <span>{loading ? 'Creating Account...' : 'CREATE ACCOUNT'}</span>
+                </button>
+
+                <div className="text-center pt-2">
+                  <p className="text-xs text-stone-600">
+                    Already have an account?{' '}
                     <button
                       type="button"
-                      onClick={() => handleRequestOtp()}
-                      disabled={loading}
-                      className="text-[#C5A059] hover:underline font-semibold cursor-pointer"
+                      onClick={() => { setAuthMainTab('signin'); setSignInSubTab('email'); setError(null); setSuccessMsg(null); }}
+                      className="text-[#C5A059] font-bold hover:underline cursor-pointer"
                     >
-                      Resend OTP
+                      Sign In
                     </button>
-                  )}
+                  </p>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* 3. CONTINUE WITH MOBILE NUMBER (DIRECT WHATSAPP OTP) */}
+          {authMainTab === 'mobile_otp' && (
+            <div className="space-y-6">
+              <div className="text-center space-y-2">
+                <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
+                  <MessageSquare className="w-6 h-6 text-[#25D366]" />
+                </div>
+                <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
+                  Continue with Mobile Number
+                </h2>
+                <p className="text-xs text-[#666666]">
+                  {step === 'phone'
+                    ? 'Instant WhatsApp OTP verification for fast guest access.'
+                    : `Enter the 6-digit WhatsApp OTP sent to ${maskedPhone}.`}
                 </p>
               </div>
 
-              <button
-                type="submit"
-                disabled={loading || otpInput.length !== 6}
-                className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
-              >
-                <ShieldCheck className="w-4 h-4 text-[#C5A059]" />
-                <span>{loading ? 'Verifying...' : 'VERIFY & LOG IN'}</span>
-              </button>
+              {step === 'phone' ? (
+                <form onSubmit={handleRequestOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      Mobile Number
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="tel"
+                        required
+                        placeholder="e.g. 9983567921"
+                        value={phoneInput}
+                        onChange={(e) => setPhoneInput(e.target.value)}
+                        className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                      />
+                      <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
+                    </div>
+                  </div>
 
-              <div className="text-center pt-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep('phone');
-                    setError(null);
-                  }}
-                  className="text-xs text-stone-500 hover:text-stone-800 underline"
-                >
-                  &larr; Change mobile number
-                </button>
-              </div>
-            </form>
+                  <button
+                    type="submit"
+                    disabled={loading}
+                    className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                  >
+                    <MessageSquare className="w-4 h-4 text-[#25D366]" />
+                    <span>{loading ? 'Sending OTP...' : 'CONTINUE WITH WHATSAPP'}</span>
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleVerifyOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                      6-Digit WhatsApp OTP
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      maxLength={6}
+                      placeholder="123456"
+                      value={otpInput}
+                      onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
+                      className="w-full bg-[#FDFCFB] border border-stone-200 px-4 py-3 text-center text-xl font-mono tracking-widest text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || otpInput.length !== 6}
+                    className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                  >
+                    <ShieldCheck className="w-4 h-4 text-[#C5A059]" />
+                    <span>{loading ? 'Verifying...' : 'VERIFY & CONTINUE'}</span>
+                  </button>
+
+                  <div className="text-center pt-2">
+                    <button
+                      type="button"
+                      onClick={() => { setStep('phone'); setError(null); }}
+                      className="text-xs text-stone-500 hover:text-stone-800 underline cursor-pointer"
+                    >
+                      &larr; Change mobile number
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           )}
 
           {/* Secure Trust Notice */}
           <div className="pt-4 border-t border-stone-100 text-center">
             <span className="inline-flex items-center gap-1.5 text-[10px] text-stone-500 uppercase tracking-widest">
               <ShieldCheck className="w-3.5 h-3.5 text-[#C5A059]" />
-              Secured with End-to-End WhatsApp Authentication
+              Secured with Encrypted Authentication & JWT Sessions
             </span>
           </div>
         </div>
