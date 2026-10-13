@@ -34,6 +34,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
     { id: 'about', label: 'About' },
     { id: 'contact', label: 'Contact' },
     { id: 'manage-booking', label: 'Manage Booking' },
+    { id: 'my-account', label: 'My Account' },
   ];
 
   const handleNavClick = (id: string) => {

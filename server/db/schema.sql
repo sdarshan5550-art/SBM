@@ -525,3 +525,20 @@ CREATE TABLE IF NOT EXISTS coupon_usage (
 CREATE INDEX IF NOT EXISTS idx_coupon_usage_coupon_id ON coupon_usage(coupon_id);
 CREATE INDEX IF NOT EXISTS idx_coupon_usage_guest ON coupon_usage(guest_email, guest_phone);
 
+-- ==========================================================
+-- 21. CUSTOMER ACCOUNTS & WHATSAPP NOTIFICATION MIGRATIONS
+-- ==========================================================
+ALTER TABLE guests ADD COLUMN IF NOT EXISTS normalized_phone VARCHAR(32);
+ALTER TABLE guests ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT FALSE;
+ALTER TABLE guests ADD COLUMN IF NOT EXISTS phone_verified_at TIMESTAMP WITH TIME ZONE;
+
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS customer_id VARCHAR(64) REFERENCES guests(id) ON DELETE SET NULL;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS whatsapp_status VARCHAR(32) DEFAULT 'pending';
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS whatsapp_sent_at TIMESTAMP WITH TIME ZONE;
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS whatsapp_message_id VARCHAR(128);
+ALTER TABLE reservations ADD COLUMN IF NOT EXISTS whatsapp_error TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_guests_normalized_phone ON guests(normalized_phone);
+CREATE INDEX IF NOT EXISTS idx_reservations_customer_id ON reservations(customer_id);
+CREATE INDEX IF NOT EXISTS idx_reservations_whatsapp_status ON reservations(whatsapp_status);
+

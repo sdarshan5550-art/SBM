@@ -6,7 +6,7 @@ import { Property, RoomType, AvailabilitySearchQuery, RoomAvailabilityResult } f
 import { api } from '../lib/api';
 import { DEFAULT_PHOTOS } from '../data/mockPhotos';
 import { GallerySection } from '../components/GallerySection';
-import { ShieldCheck, MapPin, Sparkles, Clock, Utensils, Award, CheckCircle } from 'lucide-react';
+import { ShieldCheck, MapPin, Sparkles, Clock, Utensils, Award, CheckCircle, Building } from 'lucide-react';
 import { ManagedImageDisplay } from '../components/ManagedImageDisplay';
 
 interface HomePageProps {
@@ -54,6 +54,63 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectRoomToBook, onNaviga
     }
   };
 
+  // Group room availability results by hotel property
+  const groupedResults = React.useMemo(() => {
+    if (!searchResults || searchResults.length === 0) return [];
+
+    const groups: {
+      propertyCode: string;
+      property: Property;
+      displayName: string;
+      tagline?: string;
+      address?: string;
+      rooms: RoomAvailabilityResult[];
+    }[] = [];
+
+    // Canonical ordering: SBM 1 (sbm-hotel) followed by SBM Guest House (sbm-guest-house)
+    const propertyOrder = ['sbm-hotel', 'sbm-guest-house'];
+
+    for (const code of propertyOrder) {
+      const propertyRooms = searchResults.filter(
+        (res) => res.property?.code === code || res.roomType?.property_code === code
+      );
+      if (propertyRooms.length > 0) {
+        const prop = propertyRooms[0].property;
+        const displayName = code === 'sbm-hotel' ? 'SBM 1' : 'SBM Guest House';
+        groups.push({
+          propertyCode: code,
+          property: prop,
+          displayName,
+          tagline: prop?.tagline || (code === 'sbm-hotel' ? 'Adjacent to Salasar Balaji Temple' : 'Quiet Comfort near Temple Approach'),
+          address: prop?.address,
+          rooms: propertyRooms
+        });
+      }
+    }
+
+    // Safety fallback for any properties with other codes
+    const processedCodes = new Set(propertyOrder);
+    for (const res of searchResults) {
+      const code = res.property?.code || res.roomType?.property_code;
+      if (code && !processedCodes.has(code)) {
+        processedCodes.add(code);
+        const propertyRooms = searchResults.filter(
+          (r) => r.property?.code === code || r.roomType?.property_code === code
+        );
+        groups.push({
+          propertyCode: code,
+          property: res.property,
+          displayName: res.property?.name || code,
+          tagline: res.property?.tagline,
+          address: res.property?.address,
+          rooms: propertyRooms
+        });
+      }
+    }
+
+    return groups;
+  }, [searchResults]);
+
   return (
     <div className="space-y-16 pb-16">
       {/* HERO SECTION WITH DIRECT BOOKING WIDGET */}
@@ -87,7 +144,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectRoomToBook, onNaviga
 
         {/* HERO BOOKING WIDGET */}
         <div id="booking-widget-container" className="relative z-10 w-full max-w-6xl mx-auto">
-          <HeroBookingWidget onSearch={handleSearch} />
+          <HeroBookingWidget onSearch={handleSearch} isLoading={loadingSearch} />
         </div>
       </section>
 
@@ -120,23 +177,69 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectRoomToBook, onNaviga
               </div>
             )}
 
-            <div className="grid grid-cols-1 gap-6">
-              {searchResults.length === 0 ? (
-                <div className="text-center py-12 space-y-3">
-                  <p className="text-[#1A1A1A] font-serif text-lg">No rooms available for your selected dates.</p>
-                  <p className="text-xs text-[#666666]">Please select alternative dates or consider checking both property options.</p>
-                </div>
-              ) : (
-                searchResults.map((res, i) => (
-                  <RoomCard
-                    key={i}
-                    room={res.roomType}
-                    availabilityResult={res}
-                    onSelect={(room, avail) => onSelectRoomToBook(avail!, searchParams)}
-                  />
-                ))
-              )}
-            </div>
+            {searchResults.length === 0 ? (
+              <div className="text-center py-12 space-y-3">
+                <p className="text-[#1A1A1A] font-serif text-lg">No rooms available for your selected dates.</p>
+                <p className="text-xs text-[#666666]">Please select alternative dates or consider checking both property options.</p>
+              </div>
+            ) : (
+              <div className="space-y-10">
+                {groupedResults.map((group) => (
+                  <div key={group.propertyCode} className="space-y-4">
+                    {/* Hotel Property Heading */}
+                    <div className="bg-[#FAF8F5] border-l-4 border-[#C5A059] border-y border-r border-[#C5A059]/20 px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 bg-[#C5A059]/15 text-[#C5A059] text-[10px] font-bold uppercase tracking-[0.2em]">
+                            <Building className="w-3 h-3 text-[#C5A059]" />
+                            Hotel Property
+                          </span>
+                          {group.tagline && (
+                            <span className="text-[11px] text-[#666666] hidden md:inline">
+                              • {group.tagline}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-baseline gap-2.5">
+                          <h3 className="text-xl sm:text-2xl font-serif text-[#1A1A1A] font-bold tracking-tight">
+                            {group.displayName}
+                          </h3>
+                          {group.property?.name && group.property.name !== group.displayName && (
+                            <span className="text-xs text-[#888888] font-sans">
+                              ({group.property.name})
+                            </span>
+                          )}
+                        </div>
+                        {group.address && (
+                          <div className="flex items-center gap-1.5 text-xs text-[#666666] pt-0.5">
+                            <MapPin className="w-3.5 h-3.5 text-[#C5A059] shrink-0" />
+                            <span className="truncate max-w-xl">{group.address}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2 self-start sm:self-center">
+                        <span className="text-[11px] font-medium text-[#1A1A1A] bg-white border border-[#C5A059]/30 px-3 py-1 shadow-xs">
+                          {group.rooms.length} Room Type{group.rooms.length > 1 ? 's' : ''}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Rooms for this Property */}
+                    <div className="grid grid-cols-1 gap-6">
+                      {group.rooms.map((res, i) => (
+                        <RoomCard
+                          key={res.roomType.id || i}
+                          room={res.roomType}
+                          availabilityResult={res}
+                          onSelect={(room, avail) => onSelectRoomToBook(avail!, searchParams)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
       )}

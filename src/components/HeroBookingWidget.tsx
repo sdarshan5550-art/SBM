@@ -5,11 +5,13 @@ import { PropertyCode, AvailabilitySearchQuery } from '../types';
 interface HeroBookingWidgetProps {
   onSearch: (query: AvailabilitySearchQuery) => void;
   initialValues?: Partial<AvailabilitySearchQuery>;
+  isLoading?: boolean;
 }
 
 export const HeroBookingWidget: React.FC<HeroBookingWidgetProps> = ({
   onSearch,
-  initialValues
+  initialValues,
+  isLoading = false
 }) => {
   const today = new Date();
   const tomorrow = new Date(today);
@@ -33,6 +35,7 @@ export const HeroBookingWidget: React.FC<HeroBookingWidgetProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     onSearch({
       property_code: propertyCode,
       check_in: checkIn,
@@ -212,10 +215,11 @@ export const HeroBookingWidget: React.FC<HeroBookingWidgetProps> = ({
           <div>
             <button
               type="submit"
-              className="w-full bg-[#C5A059] hover:bg-[#B48E4B] text-white py-3.5 text-[11px] uppercase tracking-[0.2em] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isLoading}
+              className="w-full bg-[#C5A059] hover:bg-[#B48E4B] disabled:opacity-60 text-white py-3.5 text-[11px] uppercase tracking-[0.2em] font-bold shadow-lg transition-colors flex items-center justify-center gap-2 cursor-pointer"
             >
               <Search className="w-4 h-4 stroke-[2.5]" />
-              <span>Check Availability</span>
+              <span>{isLoading ? 'Checking Availability...' : 'Check Availability'}</span>
             </button>
           </div>
         </div>

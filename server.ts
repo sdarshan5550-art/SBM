@@ -32,6 +32,7 @@ import { auditService } from './server/services/auditService';
 import { channelService } from './server/services/channelService';
 import { channelManagerService } from './server/services/channelManagerService';
 import { emailService, logEmailStartupDiagnostics } from './server/services/emailService';
+import { bhashSmsService, normalizePhoneNumber } from './server/services/whatsappService';
 import {
   getRazorpayServerConfig,
   logRazorpayStartupDiagnostics,
@@ -208,6 +209,20 @@ async function startServer() {
       if (booking.booking_status === 'Confirmed' || booking.payment_status === 'Completed' || booking.payment_status === 'Paid') {
         emailService.sendBookingConfirmationEmail(booking).catch((err: any) => {
           console.error('[EmailService] Async confirmation error:', err?.message || err);
+        });
+
+        // Trigger WhatsApp booking confirmation via BhashSMS
+        bhashSmsService.sendBookingConfirmation(booking).then((waRes) => {
+          if (waRes.success) {
+            db.updateBookingWhatsAppStatus(booking.id, 'sent', waRes.messageId);
+          } else if (waRes.notConfigured) {
+            db.updateBookingWhatsAppStatus(booking.id, 'not_configured', undefined, waRes.error);
+          } else {
+            db.updateBookingWhatsAppStatus(booking.id, 'failed', undefined, waRes.error);
+          }
+        }).catch((waErr: any) => {
+          console.error('[WhatsApp] Async booking confirmation error:', waErr?.message || waErr);
+          db.updateBookingWhatsAppStatus(booking.id, 'failed', undefined, waErr?.message);
         });
       }
       emailService.sendAdminBookingNotification(booking).catch((err: any) => {
@@ -564,6 +579,20 @@ async function startServer() {
         console.error('[EmailService] Async Razorpay admin alert error:', err?.message || err);
       });
 
+      // WhatsApp booking confirmation via BhashSMS
+      bhashSmsService.sendBookingConfirmation(updatedBooking).then((waRes) => {
+        if (waRes.success) {
+          db.updateBookingWhatsAppStatus(updatedBooking.id, 'sent', waRes.messageId);
+        } else if (waRes.notConfigured) {
+          db.updateBookingWhatsAppStatus(updatedBooking.id, 'not_configured', undefined, waRes.error);
+        } else {
+          db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waRes.error);
+        }
+      }).catch((waErr: any) => {
+        console.error('[WhatsApp] Async Razorpay confirmation error:', waErr?.message || waErr);
+        db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waErr?.message);
+      });
+
       res.json({
         success: true,
         message: 'Payment successfully verified and booking confirmed.',
@@ -653,6 +682,19 @@ async function startServer() {
               });
               emailService.sendAdminBookingNotification(updatedBooking).catch((err: any) => {
                 console.error('[EmailService] Webhook admin alert error:', err?.message || err);
+              });
+
+              bhashSmsService.sendBookingConfirmation(updatedBooking).then((waRes) => {
+                if (waRes.success) {
+                  db.updateBookingWhatsAppStatus(updatedBooking.id, 'sent', waRes.messageId);
+                } else if (waRes.notConfigured) {
+                  db.updateBookingWhatsAppStatus(updatedBooking.id, 'not_configured', undefined, waRes.error);
+                } else {
+                  db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waRes.error);
+                }
+              }).catch((waErr: any) => {
+                console.error('[WhatsApp] Webhook confirmation error:', waErr?.message || waErr);
+                db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waErr?.message);
               });
             }
           } else if (event === 'payment.failed') {
@@ -1031,7 +1073,7 @@ ${JSON.stringify(liveAvail, null, 2)}
 
       res.json({
         success: true,
-        message: 'If an admin account with that email exists, an OTP has been sent to manager@sbmhotel.com.'
+        message: 'If an admin account with that email exists, an OTP has been sent to s.darshan5550@gmail.com.'
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message || 'Failed to process request.' });
@@ -1057,7 +1099,7 @@ ${JSON.stringify(liveAvail, null, 2)}
         return res.status(400).json({ error: 'OTP has expired. Please request a new OTP.' });
       }
       if (stored.otp !== otp.trim()) {
-        return res.status(400).json({ error: 'Incorrect OTP. Please check the OTP sent to manager@sbmhotel.com.' });
+        return res.status(400).json({ error: 'Incorrect OTP. Please check the OTP sent to s.darshan5550@gmail.com.' });
       }
 
       const updated = db.updateAdminPassword(cleanEmail, newPassword.trim());
@@ -1115,7 +1157,9 @@ ${JSON.stringify(liveAvail, null, 2)}
         booking_status: req.query.bookingStatus as string,
         payment_status: req.query.paymentStatus as string,
         search: req.query.search as string,
-        date: req.query.date as string
+        date: req.query.date as string,
+        date_filter: req.query.dateFilter as string,
+        custom_date: req.query.customDate as string
       };
       const bookings = db.getBookings(filters);
       res.json(bookings);
@@ -1138,6 +1182,19 @@ ${JSON.stringify(liveAvail, null, 2)}
         // Confirmed from Pending
         emailService.sendBookingConfirmationEmail(updated).catch((err: any) => {
           console.error('[EmailService] Async confirmation email error:', err?.message || err);
+        });
+
+        bhashSmsService.sendBookingConfirmation(updated).then((waRes) => {
+          if (waRes.success) {
+            db.updateBookingWhatsAppStatus(updated.id, 'sent', waRes.messageId);
+          } else if (waRes.notConfigured) {
+            db.updateBookingWhatsAppStatus(updated.id, 'not_configured', undefined, waRes.error);
+          } else {
+            db.updateBookingWhatsAppStatus(updated.id, 'failed', undefined, waRes.error);
+          }
+        }).catch((waErr: any) => {
+          console.error('[WhatsApp] Admin confirmation send error:', waErr?.message || waErr);
+          db.updateBookingWhatsAppStatus(updated.id, 'failed', undefined, waErr?.message);
         });
       }
 
@@ -2725,6 +2782,262 @@ res.json({
         message: 'Email dispatch completed.',
         results,
         booking: updated
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================================
+  // --- CUSTOMER ACCOUNTS & WHATSAPP OTP AUTHENTICATION ---
+  // ==========================================================
+
+  // Customer OTP In-Memory Secure Store with Rate-Limiting & Expiry
+  interface CustomerOtpRecord {
+    otp: string;
+    expiresAt: number;
+    attempts: number;
+    resendAvailableAt: number;
+  }
+  const customerOtpStore = new Map<string, CustomerOtpRecord>();
+
+  // Middleware: Customer JWT Authentication Check
+  const authenticateCustomer = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Customer authentication required. Please log in.' });
+    }
+    const token = authHeader.split(' ')[1];
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET) as { id: string; phone: string; role: string };
+      if (!decoded || decoded.role !== 'customer') {
+        return res.status(401).json({ error: 'Invalid customer token.' });
+      }
+      (req as any).customer = decoded;
+      next();
+    } catch (err) {
+      return res.status(401).json({ error: 'Session expired. Please log in again.' });
+    }
+  };
+
+  // 1. Request WhatsApp OTP for Customer Login / Account Verification
+  app.post('/api/customer/auth/request-otp', async (req, res) => {
+    try {
+      const { phone } = req.body;
+      if (!phone || typeof phone !== 'string') {
+        return res.status(400).json({ error: 'Please enter a valid mobile number.' });
+      }
+
+      const { normalized, nationalNumber, countryCode } = normalizePhoneNumber(phone);
+      if (!nationalNumber || nationalNumber.length < 10) {
+        return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
+      }
+
+      const existingRecord = customerOtpStore.get(normalized);
+      const now = Date.now();
+
+      // Enforce rate limiting: 60 seconds cooldown between resends
+      if (existingRecord && now < existingRecord.resendAvailableAt) {
+        const remainingSeconds = Math.ceil((existingRecord.resendAvailableAt - now) / 1000);
+        return res.status(429).json({
+          error: `Please wait ${remainingSeconds} seconds before requesting a new OTP.`
+        });
+      }
+
+      // Generate cryptographically secure 6-digit OTP
+      const otpCode = crypto.randomInt(100000, 1000000).toString();
+      const expiresAt = now + 10 * 60 * 1000; // 10 minutes expiry
+      const resendAvailableAt = now + 60 * 1000; // 60s cooldown
+
+      customerOtpStore.set(normalized, {
+        otp: otpCode,
+        expiresAt,
+        attempts: 0,
+        resendAvailableAt
+      });
+
+      // Dispatch OTP via BhashSMS WhatsApp service
+      const waResult = await bhashSmsService.sendOtp(normalized, otpCode);
+
+      if (!waResult.success) {
+        // Invalidate record if provider failed to accept the message
+        customerOtpStore.delete(normalized);
+        return res.status(400).json({
+          success: false,
+          error: waResult.error || 'Failed to dispatch WhatsApp OTP. Please check your mobile number and try again.'
+        });
+      }
+
+      const maskedPhone = `${countryCode} ${nationalNumber.substring(0, 3)}****${nationalNumber.slice(-3)}`;
+      res.json({
+        success: true,
+        message: 'A verification code has been sent to your WhatsApp number.',
+        maskedPhone,
+        cooldownSeconds: 60
+      });
+    } catch (err: any) {
+      console.error('[Customer Auth] OTP request error:', err?.message || err);
+      res.status(500).json({ error: err.message || 'Failed to process OTP request.' });
+    }
+  });
+
+  // 2. Verify WhatsApp OTP & Issue Customer Session Token
+  app.post('/api/customer/auth/verify-otp', async (req, res) => {
+    try {
+      const { phone, otp } = req.body;
+      if (!phone || !otp) {
+        return res.status(400).json({ error: 'Phone number and 6-digit OTP are required.' });
+      }
+
+      const { normalized, nationalNumber } = normalizePhoneNumber(phone);
+      const cleanOtp = String(otp).trim();
+
+      const record = customerOtpStore.get(normalized);
+      if (!record) {
+        return res.status(400).json({ error: 'No OTP request found for this number. Please request a new OTP.' });
+      }
+
+      const now = Date.now();
+      if (now > record.expiresAt) {
+        customerOtpStore.delete(normalized);
+        return res.status(400).json({ error: 'OTP has expired. Please request a new OTP.' });
+      }
+
+      // Brute-force protection: max 5 failed attempts
+      if (record.attempts >= 5) {
+        customerOtpStore.delete(normalized);
+        return res.status(429).json({ error: 'Too many incorrect attempts. Please request a new OTP.' });
+      }
+
+      if (record.otp !== cleanOtp) {
+        record.attempts += 1;
+        customerOtpStore.set(normalized, record);
+        const remainingAttempts = 5 - record.attempts;
+        return res.status(400).json({
+          error: `Incorrect OTP. ${remainingAttempts} attempt(s) remaining.`
+        });
+      }
+
+      // Valid OTP: delete to prevent reuse
+      customerOtpStore.delete(normalized);
+
+      // Fetch or link verified customer/guest record
+      let guest = db.getGuestByPhone(nationalNumber);
+      if (!guest) {
+        // Automatically create customer record on first verified login
+        guest = db.upsertGuest({
+          fullName: `Guest ${nationalNumber.slice(-4)}`,
+          phone: nationalNumber,
+          isVerified: true
+        });
+      } else if (!guest.is_verified) {
+        guest = db.updateGuest(guest.id, {
+          is_verified: true,
+          phone_verified_at: new Date().toISOString()
+        });
+      }
+
+      // Issue secure customer JWT session
+      const token = jwt.sign(
+        {
+          id: guest.id,
+          phone: nationalNumber,
+          normalizedPhone: normalized,
+          role: 'customer'
+        },
+        JWT_SECRET,
+        { expiresIn: '30d' }
+      );
+
+      res.json({
+        success: true,
+        message: 'Successfully verified via WhatsApp OTP.',
+        token,
+        customer: {
+          id: guest.id,
+          fullName: guest.full_name,
+          phone: guest.phone,
+          email: guest.email,
+          address: guest.address,
+          city: guest.city,
+          state: guest.state,
+          country: guest.country,
+          isVerified: guest.is_verified
+        }
+      });
+    } catch (err: any) {
+      console.error('[Customer Auth] Verify OTP error:', err?.message || err);
+      res.status(500).json({ error: err.message || 'Failed to verify OTP.' });
+    }
+  });
+
+  // 3. Get Current Authenticated Customer Profile & Booking History
+  app.get('/api/customer/profile', authenticateCustomer, (req, res) => {
+    try {
+      const customerPayload = (req as any).customer;
+      const guest = db.getGuestByPhone(customerPayload.phone) || db.getGuestById(customerPayload.id);
+
+      if (!guest) {
+        return res.status(404).json({ error: 'Customer profile not found.' });
+      }
+
+      const bookings = db.getCustomerBookings(customerPayload.phone);
+
+      res.json({
+        customer: {
+          id: guest.id,
+          fullName: guest.full_name,
+          phone: guest.phone,
+          email: guest.email,
+          address: guest.address,
+          city: guest.city,
+          state: guest.state,
+          country: guest.country,
+          isVerified: guest.is_verified,
+          totalBookings: bookings.length,
+          totalSpent: bookings.reduce((sum, b) => sum + (Number(b.total_amount) || 0), 0)
+        },
+        bookings
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 4. Update Customer Profile
+  app.put('/api/customer/profile', authenticateCustomer, (req, res) => {
+    try {
+      const customerPayload = (req as any).customer;
+      const guest = db.getGuestByPhone(customerPayload.phone) || db.getGuestById(customerPayload.id);
+
+      if (!guest) {
+        return res.status(404).json({ error: 'Customer profile not found.' });
+      }
+
+      const { fullName, email, address, city, state } = req.body;
+      const updates: any = {};
+      if (fullName && typeof fullName === 'string') updates.full_name = fullName.trim();
+      if (email !== undefined) updates.email = String(email).trim().toLowerCase();
+      if (address !== undefined) updates.address = String(address).trim();
+      if (city !== undefined) updates.city = String(city).trim();
+      if (state !== undefined) updates.state = String(state).trim();
+
+      const updated = db.updateGuest(guest.id, updates);
+
+      res.json({
+        success: true,
+        message: 'Profile updated successfully.',
+        customer: {
+          id: updated.id,
+          fullName: updated.full_name,
+          phone: updated.phone,
+          email: updated.email,
+          address: updated.address,
+          city: updated.city,
+          state: updated.state,
+          country: updated.country,
+          isVerified: updated.is_verified
+        }
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });

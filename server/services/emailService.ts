@@ -915,7 +915,7 @@ export async function sendAdminPasswordResetOtp(
   adminEmail: string,
   otpCode: string
 ): Promise<{ success: boolean; simulated?: boolean; messageId?: string }> {
-  const recipient = 'manager@sbmhotel.com';
+  const recipient = 's.darshan5550@gmail.com';
   const cfg = getEmailConfig();
   const subject = `SBM Hotel Admin - Password Reset OTP`;
   const textContent = `A password reset request was initiated for SBM Hotel admin account: ${adminEmail}.\n\nYour One-Time Password (OTP) is: ${otpCode}\n\nThis OTP is valid for 15 minutes.\nIf you did not request a password reset, please secure your account immediately.`;

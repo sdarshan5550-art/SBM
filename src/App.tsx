@@ -6,6 +6,7 @@ import { PropertyPage } from './pages/PropertyPage';
 import { AboutPage } from './pages/AboutPage';
 import { ContactPage } from './pages/ContactPage';
 import { ManageBookingPage } from './pages/ManageBookingPage';
+import { MyAccountPage } from './pages/MyAccountPage';
 import { PoliciesPage } from './pages/PoliciesPage';
 import { AdminPage } from './pages/AdminPage';
 import { ConciergeChat } from './components/ConciergeChat';
@@ -156,6 +157,10 @@ export default function App() {
 
         {currentTab === 'manage-booking' && <ManageBookingPage />}
 
+        {currentTab === 'my-account' && (
+          <MyAccountPage onOpenBookingModal={handleOpenQuickBookingModal} />
+        )}
+
         {currentTab === 'policies' && <PoliciesPage />}
 
         {currentTab === 'admin' && <AdminPage onOpenBookingModal={handleOpenQuickBookingModal} />}
@@ -267,6 +272,7 @@ export default function App() {
                 <li><button onClick={() => handleNavigate('properties')} className="hover:text-white transition-colors">Our Properties</button></li>
                 <li><button onClick={() => handleNavigate('about')} className="hover:text-white transition-colors">About SBM</button></li>
                 <li><button onClick={() => handleNavigate('manage-booking')} className="hover:text-white transition-colors">Manage My Booking</button></li>
+                <li><button onClick={() => handleNavigate('my-account')} className="hover:text-white transition-colors text-[#C5A059]">My Account</button></li>
               </ul>
             </div>
 

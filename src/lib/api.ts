@@ -32,6 +32,7 @@ import {
 } from '../types';
 
 const ADMIN_TOKEN_KEY = 'sbm_admin_token';
+const CUSTOMER_TOKEN_KEY = 'sbm_customer_token';
 
 export function getAdminToken(): string | null {
   return localStorage.getItem(ADMIN_TOKEN_KEY);
@@ -45,6 +46,18 @@ export function clearAdminToken() {
   localStorage.removeItem(ADMIN_TOKEN_KEY);
 }
 
+export function getCustomerToken(): string | null {
+  return localStorage.getItem(CUSTOMER_TOKEN_KEY);
+}
+
+export function setCustomerToken(token: string) {
+  localStorage.setItem(CUSTOMER_TOKEN_KEY, token);
+}
+
+export function clearCustomerToken() {
+  localStorage.removeItem(CUSTOMER_TOKEN_KEY);
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -52,9 +65,18 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
     ...(options?.headers as Record<string, string>)
   };
 
-  const token = getAdminToken();
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
+  if (!headers['Authorization']) {
+    if (url.startsWith('/api/customer/')) {
+      const custToken = getCustomerToken();
+      if (custToken) {
+        headers['Authorization'] = `Bearer ${custToken}`;
+      }
+    } else {
+      const token = getAdminToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
   }
 
   const res = await fetch(url, { ...options, headers });
@@ -73,9 +95,13 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
       data = JSON.parse(text);
     } catch {
       if (!res.ok) {
-        throw new Error(`Server request failed with status ${res.status}: ${res.statusText || 'Server Error'}`);
+        throw new Error(
+          res.status === 502 || res.status === 503 || res.status === 504
+            ? 'Hotel services are temporarily busy. Please try again in a few moments.'
+            : `Server request failed with status ${res.status}: ${res.statusText || 'Server Error'}`
+        );
       }
-      throw new Error(`Server returned unexpected format (${contentType || 'non-JSON'}). Please try again or contact hotel reception.`);
+      throw new Error('Service endpoint is temporarily initializing. Please refresh and try again.');
     }
   }
 
@@ -119,6 +145,44 @@ export const api = {
       body: JSON.stringify(data)
     }),
   getSettings: () => request<HotelSettings>('/api/settings'),
+
+  // Customer Accounts & WhatsApp OTP Authentication
+  customer: {
+    requestOtp: (phone: string) =>
+      request<{
+        success: boolean;
+        message: string;
+        maskedPhone?: string;
+        cooldownSeconds?: number;
+      }>('/api/customer/auth/request-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone })
+      }),
+    verifyOtp: (phone: string, otp: string) =>
+      request<{
+        success: boolean;
+        message: string;
+        token: string;
+        customer: any;
+      }>('/api/customer/auth/verify-otp', {
+        method: 'POST',
+        body: JSON.stringify({ phone, otp })
+      }),
+    getProfile: () =>
+      request<{
+        customer: any;
+        bookings: Booking[];
+      }>('/api/customer/profile'),
+    updateProfile: (updates: { fullName?: string; email?: string; address?: string; city?: string; state?: string }) =>
+      request<{
+        success: boolean;
+        message: string;
+        customer: any;
+      }>('/api/customer/profile', {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      })
+  },
 
   // Coupon System
   validateCoupon: (params: { code: string; roomId?: string; bookingAmount: number; guestEmail?: string; guestPhone?: string }) =>
@@ -187,13 +251,15 @@ export const api = {
     }),
   adminVerifyToken: () => request<{ valid: boolean; admin: any }>('/api/admin/verify'),
   getAdminOverview: () => request<any>('/api/admin/overview'),
-  getAdminBookings: (filters?: { propertyCode?: string; bookingStatus?: string; paymentStatus?: string; search?: string; date?: string }) => {
+  getAdminBookings: (filters?: { propertyCode?: string; bookingStatus?: string; paymentStatus?: string; search?: string; date?: string; dateFilter?: string; customDate?: string }) => {
     const params = new URLSearchParams();
     if (filters?.propertyCode) params.set('propertyCode', filters.propertyCode);
     if (filters?.bookingStatus) params.set('bookingStatus', filters.bookingStatus);
     if (filters?.paymentStatus) params.set('paymentStatus', filters.paymentStatus);
     if (filters?.search) params.set('search', filters.search);
     if (filters?.date) params.set('date', filters.date);
+    if (filters?.dateFilter) params.set('dateFilter', filters.dateFilter);
+    if (filters?.customDate) params.set('customDate', filters.customDate);
     return request<Booking[]>(`/api/admin/bookings?${params.toString()}`);
   },
   updateBooking: (id: string, updates: Partial<Booking>) => request<Booking>(`/api/admin/bookings/${id}`, {

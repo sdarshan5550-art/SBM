@@ -81,7 +81,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     setForgotMsg(null);
     try {
       const res = await api.adminForgotPassword(forgotEmail.trim());
-      setForgotMsg({ type: 'success', text: res.message || 'OTP has been dispatched to manager@sbmhotel.com.' });
+      setForgotMsg({ type: 'success', text: res.message || 'OTP has been dispatched to s.darshan5550@gmail.com.' });
       setForgotStep(2);
     } catch (err: any) {
       setForgotMsg({ type: 'error', text: err.message || 'Failed to send OTP.' });
@@ -154,6 +154,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
   const [filterProp, setFilterProp] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [dateFilter, setDateFilter] = useState<string>('all'); // 'all' | 'today' | 'this_week' | 'this_month' | 'custom'
+  const [customDate, setCustomDate] = useState<string>('');
   const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null);
 
   // Room Inventory
@@ -254,7 +256,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     api.getAdminBookings({
       propertyCode: filterProp,
       bookingStatus: filterStatus,
-      search: searchQuery
+      search: searchQuery,
+      dateFilter: dateFilter,
+      customDate: dateFilter === 'custom' ? customDate : undefined
     }).then(setBookings).catch(console.error);
   };
 
@@ -262,7 +266,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     if (isAuthenticated) {
       refreshBookings();
     }
-  }, [filterProp, filterStatus, searchQuery, isAuthenticated]);
+  }, [filterProp, filterStatus, searchQuery, dateFilter, customDate, isAuthenticated]);
 
   // Export Bookings to CSV
   const exportCSV = () => {
@@ -357,8 +361,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
               <h2 className="text-2xl font-serif font-medium text-[#1A1A1A]">Forgot Admin Password</h2>
               <p className="text-xs text-[#666666]">
                 {forgotStep === 1
-                  ? 'Enter your admin email to receive a password reset OTP at manager@sbmhotel.com'
-                  : 'Enter the 6-digit OTP sent to manager@sbmhotel.com and your new password'}
+                  ? 'Enter your admin email to receive a password reset OTP at s.darshan5550@gmail.com'
+                  : 'Enter the 6-digit OTP sent to s.darshan5550@gmail.com and your new password'}
               </p>
             </div>
 
@@ -433,7 +437,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                     onChange={(e) => setForgotOtp(e.target.value)}
                     className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-2.5 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059] tracking-widest font-mono"
                   />
-                  <p className="text-[10px] text-stone-400 mt-1">Check email inbox for manager@sbmhotel.com</p>
+                  <p className="text-[10px] text-stone-400 mt-1">Check email inbox for s.darshan5550@gmail.com</p>
                 </div>
 
                 <div>
@@ -875,45 +879,139 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
       {activeTab === 'bookings' && (
         <div className="space-y-6">
           {/* Filters Bar */}
-          <div className="bg-white border border-[#C5A059]/20 p-4 grid grid-cols-1 sm:grid-cols-4 gap-3 items-center shadow-sm">
-            <input
-              type="text"
-              placeholder="Search Name, Phone, ID..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-[#FDFCFB] border border-stone-200 px-3.5 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
-            />
+          <div className="bg-white border border-[#C5A059]/20 p-4 space-y-4 shadow-sm">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 items-center">
+              <input
+                type="text"
+                placeholder="Search Name, Phone, ID..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-[#FDFCFB] border border-stone-200 px-3.5 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+              />
 
-            <select
-              value={filterProp}
-              onChange={(e) => setFilterProp(e.target.value)}
-              className="bg-[#FDFCFB] border border-stone-200 px-3.5 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
-            >
-              <option value="all">All Properties</option>
-              <option value="sbm-hotel">SBM Hotel</option>
-              <option value="sbm-guest-house">SBM 2 Guest House</option>
-            </select>
+              <select
+                value={filterProp}
+                onChange={(e) => setFilterProp(e.target.value)}
+                className="bg-[#FDFCFB] border border-stone-200 px-3.5 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+              >
+                <option value="all">All Properties</option>
+                <option value="sbm-hotel">SBM Hotel</option>
+                <option value="sbm-guest-house">SBM 2 Guest House</option>
+              </select>
 
-            <select
-              value={filterStatus}
-              onChange={(e) => setFilterStatus(e.target.value)}
-              className="bg-[#FDFCFB] border border-stone-200 px-3.5 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
-            >
-              <option value="all">All Booking Statuses</option>
-              <option value="Confirmed">Confirmed</option>
-              <option value="Pending">Pending</option>
-              <option value="Checked In">Checked In</option>
-              <option value="Checked Out">Checked Out</option>
-              <option value="Cancelled">Cancelled</option>
-            </select>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="bg-[#FDFCFB] border border-stone-200 px-3.5 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+              >
+                <option value="all">All Booking Statuses</option>
+                <option value="Confirmed">Confirmed</option>
+                <option value="Pending">Pending</option>
+                <option value="Checked In">Checked In</option>
+                <option value="Checked Out">Checked Out</option>
+                <option value="Cancelled">Cancelled</option>
+              </select>
 
-            <button
-              onClick={exportCSV}
-              className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold text-xs py-2 px-4 flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider transition-colors"
-            >
-              <Download className="w-3.5 h-3.5 text-[#C5A059]" />
-              <span>Export CSV</span>
-            </button>
+              <button
+                onClick={exportCSV}
+                className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold text-xs py-2 px-4 flex items-center justify-center gap-1.5 cursor-pointer uppercase tracking-wider transition-colors"
+              >
+                <Download className="w-3.5 h-3.5 text-[#C5A059]" />
+                <span>Export CSV</span>
+              </button>
+            </div>
+
+            {/* Quick Date Filters Bar */}
+            <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-semibold text-stone-600 uppercase tracking-wider mr-1">Booking Date:</span>
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('all'); setCustomDate(''); }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xs transition-colors cursor-pointer ${
+                    dateFilter === 'all'
+                      ? 'bg-[#1A1A1A] text-[#C5A059]'
+                      : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                  }`}
+                >
+                  All Bookings
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('today'); setCustomDate(''); }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xs transition-colors cursor-pointer ${
+                    dateFilter === 'today'
+                      ? 'bg-[#1A1A1A] text-[#C5A059]'
+                      : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                  }`}
+                >
+                  Today
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('this_week'); setCustomDate(''); }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xs transition-colors cursor-pointer ${
+                    dateFilter === 'this_week'
+                      ? 'bg-[#1A1A1A] text-[#C5A059]'
+                      : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                  }`}
+                >
+                  This Week
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('this_month'); setCustomDate(''); }}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xs transition-colors cursor-pointer ${
+                    dateFilter === 'this_month'
+                      ? 'bg-[#1A1A1A] text-[#C5A059]'
+                      : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                  }`}
+                >
+                  This Month
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDateFilter('custom')}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-xs transition-colors cursor-pointer ${
+                    dateFilter === 'custom'
+                      ? 'bg-[#1A1A1A] text-[#C5A059]'
+                      : 'bg-stone-100 text-stone-700 hover:bg-stone-200'
+                  }`}
+                >
+                  Custom Date
+                </button>
+              </div>
+
+              {dateFilter === 'custom' && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="date"
+                    value={customDate}
+                    onChange={(e) => setCustomDate(e.target.value)}
+                    className="bg-[#FDFCFB] border border-stone-200 px-3 py-1.5 text-xs text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  {customDate && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomDate('')}
+                      className="text-xs text-stone-500 hover:text-stone-800 underline"
+                    >
+                      Clear Date
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {dateFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => { setDateFilter('all'); setCustomDate(''); }}
+                  className="text-xs text-[#C5A059] hover:underline font-semibold ml-auto"
+                >
+                  Clear Filter
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Bookings Table */}

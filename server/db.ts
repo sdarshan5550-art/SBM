@@ -1186,43 +1186,43 @@ class DatabaseService {
     }
 
     const holdPending = this.data.settings.hold_pending_inventory;
+    const nowIso = new Date().toISOString();
 
     for (const room of targetRooms) {
       const property = this.data.properties.find(p => p.id === room.property_id || p.code === room.property_code);
       if (!property) continue;
+
+      // Pre-filter active records relevant to this room type once
+      const roomBookings = this.data.bookings.filter(b => {
+        if (b.room_type_id !== room.id) return false;
+        if (b.booking_status === 'Cancelled' || b.booking_status === 'No Show') return false;
+        if (b.booking_status === 'Pending' && !holdPending) return false;
+        return true;
+      });
+
+      const roomBlocks = (this.data.blocked_rooms || []).filter(blk => blk.room_type_id === room.id);
+
+      const roomHolds = (this.data.inventory_holds || []).filter((h: any) => {
+        if (h.room_type_id !== room.id && h.room_type_id !== room.room_code) return false;
+        if (h.status && h.status !== 'ACTIVE') return false;
+        if (h.expires_at && h.expires_at <= nowIso) return false;
+        return true;
+      });
 
       // Find max occupancy for any night in stay
       let maxOccupied = 0;
 
       for (const nightDate of nightsList) {
         // Bookings occupying this night
-        const activeBookings = this.data.bookings.filter(b => {
-          if (b.room_type_id !== room.id) return false;
-          if (b.booking_status === 'Cancelled' || b.booking_status === 'No Show') return false;
-          if (b.booking_status === 'Pending' && !holdPending) return false;
-          // Check if nightDate falls inside [b.check_in, b.check_out)
-          return b.check_in <= nightDate && nightDate < b.check_out;
-        });
-
+        const activeBookings = roomBookings.filter(b => b.check_in <= nightDate && nightDate < b.check_out);
         const bookedCount = activeBookings.reduce((sum, b) => sum + (b.rooms_requested || 1), 0);
 
         // Blocked rooms covering this night
-        const blocks = this.data.blocked_rooms.filter(blk => {
-          if (blk.room_type_id !== room.id) return false;
-          return blk.start_date <= nightDate && nightDate < blk.end_date;
-        });
-
+        const blocks = roomBlocks.filter(blk => blk.start_date <= nightDate && nightDate < blk.end_date);
         const blockedCount = blocks.reduce((sum, blk) => sum + (blk.quantity || 1), 0);
 
-        // Active unexpired inventory holds (e.g. active Razorpay checkout sessions)
-        const nowIso = new Date().toISOString();
-        const activeHolds = (this.data.inventory_holds || []).filter((h: any) => {
-          if (h.room_type_id !== room.id && h.room_type_id !== room.room_code) return false;
-          if (h.status && h.status !== 'ACTIVE') return false;
-          if (h.expires_at && h.expires_at <= nowIso) return false; // Expired holds are ignored
-          return h.check_in <= nightDate && nightDate < h.check_out;
-        });
-
+        // Active unexpired inventory holds
+        const activeHolds = roomHolds.filter((h: any) => h.check_in <= nightDate && nightDate < h.check_out);
         const holdCount = activeHolds.reduce((sum: number, h: any) => sum + (h.rooms_count || h.roomsCount || 1), 0);
 
         const occupiedOnNight = bookedCount + blockedCount + holdCount;
@@ -1335,10 +1335,27 @@ class DatabaseService {
     const bookingNumber = `SBM-2026-${randomSuffix}`;
     const now = new Date().toISOString();
 
+    // Auto-create or link customer/guest account (preserving existing data, unverified until OTP)
+    let customerId: string | undefined = undefined;
+    try {
+      const guest = this.upsertGuest({
+        fullName: bookingData.guest_name,
+        phone: cleanPhone,
+        email: cleanEmail,
+        address: bookingData.guest_address
+      });
+      customerId = guest.id;
+    } catch (gErr) {
+      console.warn('[DB] Non-critical guest link notice:', gErr);
+    }
+
     const newBooking: Booking = {
       ...bookingData,
       id: `bk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       booking_number: bookingNumber,
+      guest_id: customerId,
+      customer_id: customerId,
+      whatsapp_status: 'pending',
       created_at: now,
       updated_at: now
     };
@@ -1354,6 +1371,8 @@ class DatabaseService {
     payment_status?: string;
     search?: string;
     date?: string;
+    date_filter?: string; // 'today' | 'this_week' | 'this_month' | 'custom'
+    custom_date?: string; // YYYY-MM-DD
   }): Booking[] {
     let list = [...this.data.bookings];
 
@@ -1369,6 +1388,79 @@ class DatabaseService {
     if (filters?.date) {
       list = list.filter(b => b.check_in <= filters.date! && filters.date! < b.check_out);
     }
+
+    // Helper to get IST date string (YYYY-MM-DD) from a date object or string
+    const getIstDateString = (dateInput: string | Date) => {
+      const d = new Date(dateInput);
+      return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }).format(d); // returns YYYY-MM-DD
+    };
+
+    const getIstNow = () => {
+      const now = new Date();
+      const formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Asia/Kolkata',
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: 'numeric',
+        second: 'numeric',
+        hour12: false
+      });
+      const parts = formatter.formatToParts(now);
+      const obj: any = {};
+      for (const p of parts) {
+        if (p.type !== 'literal') obj[p.type] = parseInt(p.value, 10);
+      }
+      return new Date(Date.UTC(obj.year, obj.month - 1, obj.day, obj.hour, obj.minute, obj.second));
+    };
+
+    if (filters?.date_filter && filters.date_filter !== 'all') {
+      const nowIst = getIstNow();
+      const todayStr = getIstDateString(nowIst);
+
+      if (filters.date_filter === 'today') {
+        list = list.filter(b => {
+          const bDate = getIstDateString(b.created_at);
+          return bDate === todayStr;
+        });
+      } else if (filters.date_filter === 'this_week') {
+        // Monday to Sunday of current week in IST
+        const dayOfWeek = (nowIst.getUTCDay() + 6) % 7; // 0 = Monday, 6 = Sunday
+        const monday = new Date(nowIst);
+        monday.setUTCDate(monday.getUTCDate() - dayOfWeek);
+        const sunday = new Date(monday);
+        sunday.setUTCDate(sunday.getUTCDate() + 6);
+
+        const mondayStr = getIstDateString(monday);
+        const sundayStr = getIstDateString(sunday);
+
+        list = list.filter(b => {
+          const bDate = getIstDateString(b.created_at);
+          return bDate >= mondayStr && bDate <= sundayStr;
+        });
+      } else if (filters.date_filter === 'this_month') {
+        const year = nowIst.getUTCFullYear();
+        const month = String(nowIst.getUTCMonth() + 1).padStart(2, '0');
+        const prefix = `${year}-${month}`;
+
+        list = list.filter(b => {
+          const bDate = getIstDateString(b.created_at);
+          return bDate.startsWith(prefix);
+        });
+      } else if (filters.date_filter === 'custom' && filters.custom_date) {
+        list = list.filter(b => {
+          const bDate = getIstDateString(b.created_at);
+          return bDate === filters.custom_date;
+        });
+      }
+    }
+
     if (filters?.search) {
       const q = filters.search.toLowerCase();
       list = list.filter(
@@ -1457,6 +1549,32 @@ class DatabaseService {
       ...current,
       ...updates,
       updated_at: new Date().toISOString()
+    };
+
+    this.data.bookings[idx] = updated;
+    this.save();
+    return updated;
+  }
+
+  public updateBookingWhatsAppStatus(
+    bookingId: string,
+    status: 'sent' | 'failed' | 'simulated' | 'not_configured',
+    messageId?: string,
+    error?: string
+  ): Booking | undefined {
+    const idx = this.data.bookings.findIndex(b => b.id === bookingId || b.booking_number === bookingId);
+    if (idx === -1) return undefined;
+
+    const current = this.data.bookings[idx];
+    const now = new Date().toISOString();
+
+    const updated: Booking = {
+      ...current,
+      whatsapp_status: status,
+      whatsapp_sent_at: status === 'sent' || status === 'simulated' ? now : current.whatsapp_sent_at,
+      whatsapp_message_id: messageId || current.whatsapp_message_id,
+      whatsapp_error: error || undefined,
+      updated_at: now
     };
 
     this.data.bookings[idx] = updated;
@@ -2360,21 +2478,34 @@ if (updates.price !== undefined) {
     country?: string;
     idType?: string;
     idNumber?: string;
+    isVerified?: boolean;
   }): Guest {
     if (!this.data.guests) this.data.guests = [];
     const cleanPhone = data.phone.trim();
-    const idx = this.data.guests.findIndex(g => g.phone === cleanPhone);
+    const digitsOnly = cleanPhone.replace(/\D/g, '');
+    const nationalPhone = digitsOnly.length > 10 ? digitsOnly.slice(-10) : digitsOnly;
+    const normalized = digitsOnly.length === 10 ? `91${digitsOnly}` : digitsOnly;
+
+    const idx = this.data.guests.findIndex(g => {
+      const gDigits = g.phone.replace(/\D/g, '');
+      const gNational = gDigits.length > 10 ? gDigits.slice(-10) : gDigits;
+      return g.phone === cleanPhone || (nationalPhone && gNational === nationalPhone);
+    });
 
     const now = new Date().toISOString();
 
     if (idx !== -1) {
+      const current = this.data.guests[idx];
       const updated: Guest = {
-        ...this.data.guests[idx],
-        full_name: data.fullName.trim(),
-        email: data.email?.trim() || this.data.guests[idx].email,
-        address: data.address || this.data.guests[idx].address,
-        id_type: data.idType || this.data.guests[idx].id_type,
-        id_number: data.idNumber || this.data.guests[idx].id_number,
+        ...current,
+        full_name: data.fullName?.trim() || current.full_name,
+        normalized_phone: normalized || current.normalized_phone,
+        email: data.email?.trim() || current.email,
+        address: data.address || current.address,
+        id_type: data.idType || current.id_type,
+        id_number: data.idNumber || current.id_number,
+        is_verified: data.isVerified !== undefined ? data.isVerified : current.is_verified,
+        phone_verified_at: data.isVerified ? (current.phone_verified_at || now) : current.phone_verified_at,
         updated_at: now
       };
       this.data.guests[idx] = updated;
@@ -2383,9 +2514,10 @@ if (updates.price !== undefined) {
     }
 
     const newGuest: Guest = {
-      id: `guest-${cleanPhone.replace(/\D/g, '') || Date.now()}`,
+      id: `guest-${nationalPhone || Date.now()}`,
       full_name: data.fullName.trim(),
       phone: cleanPhone,
+      normalized_phone: normalized,
       email: data.email?.trim() || '',
       address: data.address || '',
       city: data.city || 'Salasar',
@@ -2393,6 +2525,8 @@ if (updates.price !== undefined) {
       country: data.country || 'India',
       id_type: data.idType || 'Aadhaar',
       id_number: data.idNumber || '',
+      is_verified: Boolean(data.isVerified),
+      phone_verified_at: data.isVerified ? now : undefined,
       total_bookings: 1,
       total_spent: 0,
       created_at: now,
@@ -2402,6 +2536,56 @@ if (updates.price !== undefined) {
     this.data.guests.push(newGuest);
     this.save();
     return newGuest;
+  }
+
+  public getGuestByPhone(rawPhone: string): Guest | null {
+    if (!this.data.guests) this.data.guests = [];
+    const clean = rawPhone.trim();
+    const digitsOnly = clean.replace(/\D/g, '');
+    const nationalPhone = digitsOnly.length > 10 ? digitsOnly.slice(-10) : digitsOnly;
+
+    // Check direct stored guests
+    const match = this.data.guests.find(g => {
+      const gDigits = (g.phone || '').replace(/\D/g, '');
+      const gNational = gDigits.length > 10 ? gDigits.slice(-10) : gDigits;
+      return g.phone === clean || (nationalPhone && gNational === nationalPhone);
+    });
+
+    if (match) return match;
+
+    // Check bookings to synthesize if existing customer
+    const bMatch = this.data.bookings.find(b => {
+      const bDigits = (b.guest_phone || '').replace(/\D/g, '');
+      const bNational = bDigits.length > 10 ? bDigits.slice(-10) : bDigits;
+      return b.guest_phone === clean || (nationalPhone && bNational === nationalPhone);
+    });
+
+    if (bMatch) {
+      return this.upsertGuest({
+        fullName: bMatch.guest_name,
+        phone: bMatch.guest_phone,
+        email: bMatch.guest_email,
+        address: bMatch.guest_address
+      });
+    }
+
+    return null;
+  }
+
+  public getCustomerBookings(phoneOrId: string): Booking[] {
+    const clean = phoneOrId.trim();
+    const digitsOnly = clean.replace(/\D/g, '');
+    const nationalPhone = digitsOnly.length > 10 ? digitsOnly.slice(-10) : digitsOnly;
+
+    return this.data.bookings.filter(b => {
+      if (b.customer_id === clean || b.guest_id === clean) return true;
+      if (b.guest_phone) {
+        const bDigits = b.guest_phone.replace(/\D/g, '');
+        const bNational = bDigits.length > 10 ? bDigits.slice(-10) : bDigits;
+        if (nationalPhone && bNational === nationalPhone) return true;
+      }
+      return false;
+    }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }
 
   public updateGuest(id: string, updates: Partial<Guest>): Guest {

@@ -124,6 +124,7 @@ export interface Guest {
   last_name?: string;
   full_name: string;
   phone: string;
+  normalized_phone?: string;
   email?: string;
   address?: string;
   city?: string;
@@ -131,6 +132,8 @@ export interface Guest {
   country?: string;
   id_type?: string;
   id_number?: string;
+  is_verified?: boolean;
+  phone_verified_at?: string;
   total_bookings?: number;
   total_spent?: number;
   last_stay?: string;
@@ -201,12 +204,17 @@ export interface Booking {
   created_at: string;
   updated_at: string;
   payments?: PaymentRecord[];
+  customer_id?: string;
   customer_email_status?: 'pending' | 'sent' | 'failed' | 'simulated';
   admin_email_status?: 'pending' | 'sent' | 'failed' | 'simulated';
   customer_email_sent_at?: string;
   admin_email_sent_at?: string;
   customer_email_error?: string;
   admin_email_error?: string;
+  whatsapp_status?: 'pending' | 'sent' | 'failed' | 'simulated' | 'not_configured';
+  whatsapp_sent_at?: string;
+  whatsapp_message_id?: string;
+  whatsapp_error?: string;
 }
 
 export interface PMSCalendarData {
