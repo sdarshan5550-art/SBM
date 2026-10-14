@@ -1980,6 +1980,9 @@ res.json({
   // --- IMAGE MANAGEMENT (PUBLIC & ADMIN) ---
   app.get('/api/images', (req, res) => {
     try {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       const { category, roomId, propertyId } = req.query;
       const images = db.getManagedImages({
         category: category as string,
@@ -2981,30 +2984,29 @@ res.json({
         return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
       }
 
-      const { nationalNumber } = normalizePhoneNumber(phone);
+      const { normalized, nationalNumber, countryCode } = normalizePhoneNumber(phone);
       if (!nationalNumber || nationalNumber.length < 10) {
         return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
       }
 
       // Check duplicate email
       const existingEmail = db.getGuestByEmail(cleanEmail);
-      if (existingEmail) {
+      if (existingEmail && existingEmail.password_hash && existingEmail.is_verified) {
         return res.status(400).json({ error: 'An account with this email address already exists. Please log in.' });
       }
 
       // Check duplicate phone
       const existingPhone = db.getGuestByPhone(nationalNumber);
-      let guest: any;
+      if (existingPhone && existingPhone.email && existingPhone.email.trim().toLowerCase() !== cleanEmail && existingPhone.is_verified) {
+        return res.status(400).json({ error: 'An account with this mobile number already exists. Please sign in.' });
+      }
 
+      let guest: any;
       if (existingPhone) {
-        if (existingPhone.email && existingPhone.email.trim().toLowerCase() === cleanEmail) {
-          return res.status(400).json({ error: 'Account already exists. Please log in.' });
-        }
-        // Link email and password to existing guest record
         guest = db.updateGuest(existingPhone.id, {
           full_name: fullName.trim(),
           email: cleanEmail,
-          is_verified: true
+          is_verified: false
         });
         db.setGuestPassword(guest.id, password);
       } else {
@@ -3012,38 +3014,56 @@ res.json({
           fullName: fullName.trim(),
           phone: nationalNumber,
           email: cleanEmail,
-          isVerified: true
+          isVerified: false
         });
         db.setGuestPassword(guest.id, password);
       }
 
-      // Issue JWT session
-      const token = jwt.sign(
-        {
-          id: guest.id,
-          phone: nationalNumber,
-          email: cleanEmail,
-          role: 'customer'
-        },
-        JWT_SECRET,
-        { expiresIn: '30d' }
-      );
+      // Generate cryptographically secure 6-digit OTP for WhatsApp mobile verification
+      const now = Date.now();
+      const otpCode = crypto.randomInt(100000, 1000000).toString();
+      const expiresAt = now + 10 * 60 * 1000; // 10 minutes expiry
+      const resendAvailableAt = now + 60 * 1000; // 60s cooldown
+
+      customerOtpStore.set(normalized, {
+        otp: otpCode,
+        expiresAt,
+        attempts: 0,
+        resendAvailableAt
+      });
+
+      // Dispatch WhatsApp OTP
+      const waResult = await bhashSmsService.sendOtp(normalized, otpCode);
+      const maskedPhone = `${countryCode} ${nationalNumber.substring(0, 3)}****${nationalNumber.slice(-3)}`;
+
+      if (!waResult.success) {
+        if (waResult.notConfigured) {
+          console.warn('[Register WhatsApp OTP] WhatsApp service is not configured on this server.');
+          return res.json({
+            success: true,
+            requiresOtp: true,
+            notConfigured: true,
+            message: 'Account details saved. Please verify your mobile number with the WhatsApp OTP.',
+            phone: nationalNumber,
+            maskedPhone,
+            cooldownSeconds: 60
+          });
+        }
+
+        // Provider failed to deliver
+        customerOtpStore.delete(normalized);
+        return res.status(400).json({
+          error: waResult.error || 'Failed to dispatch WhatsApp OTP. Please check your mobile number and try again.'
+        });
+      }
 
       res.json({
         success: true,
-        message: 'Account created successfully!',
-        token,
-        customer: {
-          id: guest.id,
-          fullName: guest.full_name,
-          phone: guest.phone,
-          email: guest.email,
-          address: guest.address,
-          city: guest.city,
-          state: guest.state,
-          country: guest.country,
-          isVerified: guest.is_verified
-        }
+        requiresOtp: true,
+        message: 'Account details saved! A 6-digit WhatsApp verification code has been sent to your mobile number.',
+        phone: nationalNumber,
+        maskedPhone,
+        cooldownSeconds: 60
       });
     } catch (err: any) {
       console.error('[Customer Register Error]:', err);

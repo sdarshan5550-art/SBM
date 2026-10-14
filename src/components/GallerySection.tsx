@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { DEFAULT_PHOTOS } from '../data/mockPhotos';
-import { Camera, Maximize2, X } from 'lucide-react';
+import { Camera, Maximize2, X, ImageOff } from 'lucide-react';
 import { api } from '../lib/api';
 import { ManagedImage } from '../types';
 import { ManagedImageDisplay } from './ManagedImageDisplay';
@@ -9,22 +8,29 @@ export const GallerySection: React.FC = () => {
   const [selectedCategory, setSelectedCategory] = useState<'all' | 'hotel' | 'guesthouse' | 'rooms'>('all');
   const [activeImage, setActiveImage] = useState<string | null>(null);
   const [dynamicImages, setDynamicImages] = useState<ManagedImage[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     let isMounted = true;
+    setIsLoading(true);
     api.getImages()
       .then(images => {
-        if (isMounted && Array.isArray(images) && images.length > 0) {
-          setDynamicImages(images);
+        if (isMounted) {
+          setDynamicImages(Array.isArray(images) ? images : []);
+          setIsLoading(false);
         }
       })
       .catch(err => {
-        console.warn('Could not fetch dynamic gallery images, using defaults', err);
+        console.warn('Could not fetch dynamic gallery images', err);
+        if (isMounted) {
+          setDynamicImages([]);
+          setIsLoading(false);
+        }
       });
     return () => { isMounted = false; };
   }, []);
 
-  const formattedDynamic = (dynamicImages || [])
+  const galleryItems = (dynamicImages || [])
     .filter(img => (img.status || 'active') === 'active')
     .map(img => {
       const isRooms = img.category === 'Rooms & Interiors' ||
@@ -32,13 +38,15 @@ export const GallerySection: React.FC = () => {
                       img.category === 'rooms' ||
                       img.roomId === 'deluxe' ||
                       img.roomId === 'family' ||
-                      img.category.includes('Room') ||
-                      img.category.includes('Suite');
+                      img.category === 'Deluxe Room' ||
+                      img.category === 'Family Suite' ||
+                      (img.category && img.category.includes('Room')) ||
+                      (img.category && img.category.includes('Suite'));
 
       const isGuestHouse = img.propertyId === 'sbm-guest-house' ||
                            img.propertyId === 'prop-sbm-guesthouse' ||
-                           img.category.toLowerCase().includes('guest') ||
-                           img.category.toLowerCase().includes('sbm 2');
+                           (img.category && img.category.toLowerCase().includes('guest')) ||
+                           (img.category && img.category.toLowerCase().includes('sbm 2'));
 
       const propKey: 'hotel' | 'guesthouse' = isGuestHouse ? 'guesthouse' : 'hotel';
       const catKey: 'hotel' | 'guesthouse' | 'rooms' = isRooms ? 'rooms' : propKey;
@@ -49,86 +57,10 @@ export const GallerySection: React.FC = () => {
         title: img.title || img.category,
         subtitle: img.description || (isGuestHouse ? 'SBM 2 Guest House' : 'SBM Hotel'),
         category: catKey,
-        propertyId: propKey
+        propertyId: propKey,
+        rawCategory: img.category
       };
     });
-
-  const defaultGalleryItems = [
-    {
-      id: 'def-1',
-      url: DEFAULT_PHOTOS.sbmHotelExterior,
-      title: 'SBM Hotel - Day Exterior Facade',
-      subtitle: 'Main Temple Road Facade (SBM Hotel 1)',
-      category: 'hotel' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-2',
-      url: DEFAULT_PHOTOS.sbmHotelEvening,
-      title: 'SBM Hotel - Evening Twilight View',
-      subtitle: 'Warm Architectural Night Lighting',
-      category: 'hotel' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-3',
-      url: DEFAULT_PHOTOS.sbmEntranceFacade,
-      title: 'SBM Hotel - Welcome Entrance',
-      subtitle: 'Driveway & Temple View Entrance Walkway',
-      category: 'hotel' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-4',
-      url: DEFAULT_PHOTOS.sbmGuestHouseExterior,
-      title: 'SBM 2 Guest House - Front Facade',
-      subtitle: 'Peaceful Location on Temple Approach Road',
-      category: 'guesthouse' as const,
-      propertyId: 'guesthouse' as const
-    },
-    {
-      id: 'def-5',
-      url: DEFAULT_PHOTOS.deluxeRoom,
-      title: 'Deluxe Room - Main Bed View',
-      subtitle: 'King Bed with Cushioned Leather Headboard',
-      category: 'rooms' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-6',
-      url: DEFAULT_PHOTOS.deluxeSeating,
-      title: 'Deluxe Room - Seating Area',
-      subtitle: 'Private Seating & Modern Room Amenities',
-      category: 'rooms' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-7',
-      url: DEFAULT_PHOTOS.deluxeLounge,
-      title: 'Deluxe Room - Corner Lounge & Vanity',
-      subtitle: 'Work Desk & Hygienic Bath Vanity Access',
-      category: 'rooms' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-8',
-      url: DEFAULT_PHOTOS.familySuite,
-      title: 'Family Suite - Main Bedroom Layout',
-      subtitle: 'Dual Beds for Group & Family Devotees',
-      category: 'rooms' as const,
-      propertyId: 'hotel' as const
-    },
-    {
-      id: 'def-9',
-      url: DEFAULT_PHOTOS.familySuiteTV,
-      title: 'Family Suite - Entertainment & Daybed Lounge',
-      subtitle: 'Smart TV Unit, Leather Daybed & Lounge Space',
-      category: 'rooms' as const,
-      propertyId: 'hotel' as const
-    }
-  ];
-
-  const galleryItems = [...formattedDynamic, ...defaultGalleryItems];
 
   const filteredItems = selectedCategory === 'all'
     ? galleryItems
@@ -200,35 +132,52 @@ export const GallerySection: React.FC = () => {
         </div>
 
         {/* Gallery Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredItems.map((item, index) => (
-            <div
-              key={index}
-              onClick={() => setActiveImage(item.url)}
-              className="group relative h-64 bg-stone-100 border border-stone-200 overflow-hidden cursor-pointer shadow-sm hover:shadow-md transition-all"
-            >
-              <ManagedImageDisplay
-                src={item.url}
-                alt={item.title}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                fallbackType="hotel"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
-              
-              <div className="absolute top-3 right-3 p-2 bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
-                <Maximize2 className="w-4 h-4" />
-              </div>
+        {isLoading ? (
+          <div className="text-center py-12 px-4 bg-white border border-stone-200 shadow-xs">
+            <p className="text-xs text-stone-500">Loading gallery photos...</p>
+          </div>
+        ) : galleryItems.length === 0 ? (
+          <div className="text-center py-12 px-4 bg-white border border-stone-200 shadow-xs space-y-2">
+            <Camera className="w-10 h-10 text-stone-300 mx-auto" />
+            <h4 className="text-sm font-semibold text-stone-700">No Gallery Photos Published</h4>
+            <p className="text-xs text-stone-500">Photos published in Image Management will appear here.</p>
+          </div>
+        ) : filteredItems.length === 0 ? (
+          <div className="text-center py-12 px-4 bg-white border border-stone-200 shadow-xs space-y-2">
+            <ImageOff className="w-8 h-8 text-stone-300 mx-auto" />
+            <p className="text-xs text-stone-500">No photos available in this category.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredItems.map((item, index) => (
+              <div
+                key={item.id || index}
+                onClick={() => setActiveImage(item.url)}
+                className="group relative h-64 bg-stone-100 border border-stone-200 overflow-hidden cursor-pointer shadow-sm hover:shadow-md transition-all"
+              >
+                <ManagedImageDisplay
+                  src={item.url}
+                  alt={item.title}
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  fallbackType="hotel"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-80 group-hover:opacity-90 transition-opacity" />
+                
+                <div className="absolute top-3 right-3 p-2 bg-black/40 text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                  <Maximize2 className="w-4 h-4" />
+                </div>
 
-              <div className="absolute bottom-4 left-4 right-4 text-white space-y-1">
-                <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#C5A059]">
-                  {item.category === 'hotel' ? 'SBM Hotel 1' : item.category === 'guesthouse' ? 'SBM 2 Guest House' : 'Outdoor View'}
-                </span>
-                <h3 className="font-serif text-sm font-medium leading-snug">{item.title}</h3>
-                <p className="text-[11px] text-white/70 font-sans">{item.subtitle}</p>
+                <div className="absolute bottom-4 left-4 right-4 text-white space-y-1">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#C5A059]">
+                    {item.rawCategory || (item.category === 'hotel' ? 'SBM Hotel 1' : item.category === 'guesthouse' ? 'SBM 2 Guest House' : 'Rooms & Interiors')}
+                  </span>
+                  <h3 className="font-serif text-sm font-medium leading-snug">{item.title}</h3>
+                  <p className="text-[11px] text-white/70 font-sans">{item.subtitle}</p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Lightbox Modal */}

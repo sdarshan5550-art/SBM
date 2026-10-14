@@ -15,7 +15,11 @@ import {
   Edit2,
   Save,
   X,
-  MessageSquare
+  MessageSquare,
+  LogIn,
+  UserPlus,
+  Mail,
+  Lock
 } from 'lucide-react';
 import { api, getCustomerToken, setCustomerToken, clearCustomerToken } from '../lib/api';
 import { Booking } from '../types';
@@ -45,6 +49,8 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
   const [authMainTab, setAuthMainTab] = useState<'signin' | 'register' | 'mobile_otp'>('signin');
   const [signInSubTab, setSignInSubTab] = useState<'mobile' | 'email'>('mobile');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regStep, setRegStep] = useState<'form' | 'otp'>('form');
+  const [regOtpInput, setRegOtpInput] = useState('');
   const [emailAuthMode, setEmailAuthMode] = useState<'login' | 'forgot'>('login');
 
   const [phoneInput, setPhoneInput] = useState('');
@@ -224,6 +230,12 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
       return;
     }
 
+    const digitsOnly = regPhone.replace(/\D/g, '');
+    if (digitsOnly.length < 10) {
+      setError('Please enter a valid 10-digit mobile number.');
+      return;
+    }
+
     if (regPassword !== regConfirmPassword) {
       setError('Passwords do not match. Please ensure both password fields are identical.');
       return;
@@ -245,18 +257,83 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
         phone: regPhone.trim(),
         password: regPassword
       });
+
+      if (res.requiresOtp) {
+        setMaskedPhone(res.maskedPhone || regPhone.trim());
+        setCooldown(res.cooldownSeconds || 60);
+        setRegStep('otp');
+        setSuccessMsg(res.message || 'Please enter the 6-digit WhatsApp verification code sent to your mobile number.');
+      } else if (res.token && res.customer) {
+        setCustomerToken(res.token);
+        setIsAuthenticated(true);
+        setCustomer(res.customer);
+        setSuccessMsg('Account created successfully! Welcome to SBM Hotel.');
+        setRegFullName('');
+        setRegEmail('');
+        setRegPhone('');
+        setRegPassword('');
+        setRegConfirmPassword('');
+        setRegStep('form');
+      }
+    } catch (err: any) {
+      console.error('[MyAccount] Registration error:', err);
+      if (err?.notConfigured || err?.message?.includes('unconfigured') || err?.message?.includes('BHASHSMS')) {
+        setIsNotConfigured(true);
+      }
+      setError(err.message || 'Failed to create account.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 4b. Verify Registration WhatsApp OTP
+  const handleVerifyRegOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!regOtpInput.trim() || regOtpInput.length !== 6) {
+      setError('Please enter the 6-digit verification code sent to your WhatsApp.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await api.customer.verifyOtp(regPhone.trim(), regOtpInput.trim());
       setCustomerToken(res.token);
       setIsAuthenticated(true);
       setCustomer(res.customer);
-      setSuccessMsg('Account created successfully! Welcome to SBM Hotel.');
+      setSuccessMsg('Account created and mobile number verified successfully! Welcome to SBM Hotel.');
       setRegFullName('');
       setRegEmail('');
       setRegPhone('');
       setRegPassword('');
       setRegConfirmPassword('');
+      setRegOtpInput('');
+      setRegStep('form');
     } catch (err: any) {
-      console.error('[MyAccount] Registration error:', err);
-      setError(err.message || 'Failed to create account.');
+      console.error('[MyAccount] Registration OTP verify error:', err);
+      setError(err.message || 'Invalid verification code. Please check and try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 4c. Resend Registration WhatsApp OTP
+  const handleResendRegOtp = async () => {
+    if (cooldown > 0 || !regPhone.trim()) return;
+    setLoading(true);
+    setError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await api.customer.requestOtp(regPhone.trim());
+      setMaskedPhone(res.maskedPhone || regPhone.trim());
+      setCooldown(res.cooldownSeconds || 60);
+      setSuccessMsg('A new verification code has been dispatched to your WhatsApp.');
+    } catch (err: any) {
+      console.error('[MyAccount] Resend Registration OTP error:', err);
+      setError(err.message || 'Failed to resend verification code.');
     } finally {
       setLoading(false);
     }
@@ -394,29 +471,44 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
 
       {/* UNAUTHENTICATED VIEW: THREE CLEAR OPTIONS */}
       {!isAuthenticated ? (
-        <div className="max-w-md mx-auto bg-white border border-[#C5A059]/20 p-6 sm:p-8 shadow-sm space-y-6">
+        <div className="max-w-xl mx-auto bg-white border border-[#C5A059]/20 p-6 sm:p-8 shadow-sm space-y-6">
           {/* Three Clear Options Header */}
-          <div className="grid grid-cols-3 p-1 bg-stone-100 rounded-lg border border-stone-200 text-xs font-semibold text-center gap-1">
+          <div className="grid grid-cols-1 sm:grid-cols-3 p-1.5 bg-[#F5F3EF] rounded-xl border border-stone-200 text-xs font-semibold text-center gap-1.5">
             <button
               type="button"
               onClick={() => { setAuthMainTab('signin'); setError(null); setSuccessMsg(null); }}
-              className={`py-2 px-1 rounded-md transition-all cursor-pointer ${authMainTab === 'signin' ? 'bg-[#1A1A1A] text-white shadow-xs font-bold' : 'text-stone-700 hover:text-stone-900 bg-white'}`}
+              className={`py-2.5 px-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMainTab === 'signin'
+                  ? 'bg-[#1A1A1A] text-white shadow-xs font-bold'
+                  : 'text-stone-700 hover:text-stone-950 hover:bg-white/80'
+              }`}
             >
-              Sign In
+              <LogIn className="w-3.5 h-3.5 text-[#C5A059]" />
+              <span>Sign In</span>
             </button>
             <button
               type="button"
-              onClick={() => { setAuthMainTab('register'); setError(null); setSuccessMsg(null); }}
-              className={`py-2 px-1 rounded-md transition-all cursor-pointer ${authMainTab === 'register' ? 'bg-[#1A1A1A] text-white shadow-xs font-bold' : 'text-stone-700 hover:text-stone-900 bg-white'}`}
+              onClick={() => { setAuthMainTab('register'); setRegStep('form'); setError(null); setSuccessMsg(null); }}
+              className={`py-2.5 px-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMainTab === 'register'
+                  ? 'bg-[#1A1A1A] text-white shadow-xs font-bold'
+                  : 'text-stone-700 hover:text-stone-950 hover:bg-white/80'
+              }`}
             >
-              Create Account
+              <UserPlus className="w-3.5 h-3.5 text-[#C5A059]" />
+              <span>New User? Create Account</span>
             </button>
             <button
               type="button"
               onClick={() => { setAuthMainTab('mobile_otp'); setError(null); setSuccessMsg(null); }}
-              className={`py-2 px-1 rounded-md transition-all cursor-pointer ${authMainTab === 'mobile_otp' ? 'bg-[#1A1A1A] text-white shadow-xs font-bold' : 'text-stone-700 hover:text-stone-900 bg-white'}`}
+              className={`py-2.5 px-2 rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                authMainTab === 'mobile_otp'
+                  ? 'bg-[#1A1A1A] text-white shadow-xs font-bold'
+                  : 'text-stone-700 hover:text-stone-950 hover:bg-white/80'
+              }`}
             >
-              WhatsApp OTP
+              <MessageSquare className="w-3.5 h-3.5 text-[#25D366]" />
+              <span>Continue with Mobile</span>
             </button>
           </div>
 
@@ -424,20 +516,30 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
           {authMainTab === 'signin' && (
             <div className="space-y-6">
               {/* Sign In Sub-Tabs */}
-              <div className="flex border-b border-stone-200 pb-2 text-xs font-semibold">
+              <div className="flex bg-[#F7F5F0] p-1 rounded-lg border border-stone-200 text-xs font-semibold gap-1">
                 <button
                   type="button"
                   onClick={() => { setSignInSubTab('mobile'); setError(null); setSuccessMsg(null); }}
-                  className={`flex-1 pb-2 border-b-2 transition-colors cursor-pointer text-center ${signInSubTab === 'mobile' ? 'border-[#C5A059] text-[#1A1A1A] font-bold' : 'border-transparent text-stone-500 hover:text-stone-800'}`}
+                  className={`flex-1 py-2 px-3 rounded-md transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 ${
+                    signInSubTab === 'mobile'
+                      ? 'bg-white text-[#1A1A1A] font-bold shadow-xs border border-stone-200/80'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
                 >
-                  Mobile Number (OTP)
+                  <MessageSquare className="w-3.5 h-3.5 text-[#25D366]" />
+                  <span>Mobile Number (WhatsApp OTP)</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setSignInSubTab('email'); setError(null); setSuccessMsg(null); }}
-                  className={`flex-1 pb-2 border-b-2 transition-colors cursor-pointer text-center ${signInSubTab === 'email' ? 'border-[#C5A059] text-[#1A1A1A] font-bold' : 'border-transparent text-stone-500 hover:text-stone-800'}`}
+                  className={`flex-1 py-2 px-3 rounded-md transition-all cursor-pointer text-center flex items-center justify-center gap-1.5 ${
+                    signInSubTab === 'email'
+                      ? 'bg-white text-[#1A1A1A] font-bold shadow-xs border border-stone-200/80'
+                      : 'text-stone-600 hover:text-stone-900'
+                  }`}
                 >
-                  Email & Password
+                  <Mail className="w-3.5 h-3.5 text-[#C5A059]" />
+                  <span>Email Address</span>
                 </button>
               </div>
 
@@ -706,112 +808,195 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
           {/* 2. NEW USER? CREATE ACCOUNT */}
           {authMainTab === 'register' && (
             <div className="space-y-6">
-              <div className="text-center space-y-2">
-                <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
-                  <User className="w-6 h-6 text-[#C5A059]" />
-                </div>
-                <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
-                  New User? Create Account
-                </h2>
-                <p className="text-xs text-[#666666]">
-                  Register your profile to access booking history across SBM Hotel & Guest House.
-                </p>
-              </div>
+              {regStep === 'form' ? (
+                <>
+                  <div className="text-center space-y-2">
+                    <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
+                      <UserPlus className="w-6 h-6 text-[#C5A059]" />
+                    </div>
+                    <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
+                      New User? Create Account
+                    </h2>
+                    <p className="text-xs text-[#666666]">
+                      Register your profile to access booking history across SBM Hotel & Guest House.
+                    </p>
+                  </div>
 
-              <form onSubmit={handleRegister} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                    Full Name *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="e.g. Rajesh Sharma"
-                    value={regFullName}
-                    onChange={(e) => setRegFullName(e.target.value)}
-                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
+                  <form onSubmit={handleRegister} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                        Full Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Rajesh Sharma"
+                        value={regFullName}
+                        onChange={(e) => setRegFullName(e.target.value)}
+                        className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                      />
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                    Mobile Number *
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    placeholder="e.g. 9983567921"
-                    value={regPhone}
-                    onChange={(e) => setRegPhone(e.target.value)}
-                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                        Mobile Number *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="tel"
+                          required
+                          placeholder="e.g. 9983567921"
+                          value={regPhone}
+                          onChange={(e) => setRegPhone(e.target.value)}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                        />
+                        <Phone className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
+                      </div>
+                      <p className="text-[11px] text-stone-500 mt-1">We will send a 6-digit WhatsApp OTP to verify this number.</p>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                    Email Address *
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    placeholder="e.g. rajesh@example.com"
-                    value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                        Email Address *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="email"
+                          required
+                          placeholder="e.g. rajesh@example.com"
+                          value={regEmail}
+                          onChange={(e) => setRegEmail(e.target.value)}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                        />
+                        <Mail className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
+                      </div>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                    Password * (min 6 characters)
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    placeholder="••••••••"
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                        Password * (min 6 characters)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          placeholder="••••••••"
+                          value={regPassword}
+                          onChange={(e) => setRegPassword(e.target.value)}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                        />
+                        <Lock className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
+                      </div>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
-                    Confirm Password *
-                  </label>
-                  <input
-                    type="password"
-                    required
-                    minLength={6}
-                    placeholder="••••••••"
-                    value={regConfirmPassword}
-                    onChange={(e) => setRegConfirmPassword(e.target.value)}
-                    className="w-full bg-[#FDFCFB] border border-stone-200 px-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
-                  />
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                        Confirm Password *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="password"
+                          required
+                          minLength={6}
+                          placeholder="••••••••"
+                          value={regConfirmPassword}
+                          onChange={(e) => setRegConfirmPassword(e.target.value)}
+                          className="w-full bg-[#FDFCFB] border border-stone-200 pl-10 pr-3.5 py-3 text-[#1A1A1A] text-sm focus:outline-none focus:border-[#C5A059]"
+                        />
+                        <Lock className="w-4 h-4 text-stone-400 absolute left-3.5 top-3.5" />
+                      </div>
+                    </div>
 
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
-                >
-                  <span>{loading ? 'Creating Account...' : 'CREATE ACCOUNT'}</span>
-                </button>
-
-                <div className="text-center pt-2">
-                  <p className="text-xs text-stone-600">
-                    Already have an account?{' '}
                     <button
-                      type="button"
-                      onClick={() => { setAuthMainTab('signin'); setSignInSubTab('email'); setError(null); setSuccessMsg(null); }}
-                      className="text-[#C5A059] font-bold hover:underline cursor-pointer"
+                      type="submit"
+                      disabled={loading}
+                      className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
                     >
-                      Sign In
+                      <UserPlus className="w-4 h-4 text-[#C5A059]" />
+                      <span>{loading ? 'Processing...' : 'CREATE ACCOUNT'}</span>
                     </button>
-                  </p>
+
+                    <div className="text-center pt-2">
+                      <p className="text-xs text-stone-600">
+                        Already have an account?{' '}
+                        <button
+                          type="button"
+                          onClick={() => { setAuthMainTab('signin'); setSignInSubTab('email'); setError(null); setSuccessMsg(null); }}
+                          className="text-[#C5A059] font-bold hover:underline cursor-pointer"
+                        >
+                          Sign In
+                        </button>
+                      </p>
+                    </div>
+                  </form>
+                </>
+              ) : (
+                <div className="space-y-6">
+                  <div className="text-center space-y-2">
+                    <div className="w-12 h-12 bg-[#1A1A1A] text-[#C5A059] rounded-full flex items-center justify-center mx-auto shadow-xs">
+                      <MessageSquare className="w-6 h-6 text-[#25D366]" />
+                    </div>
+                    <h2 className="text-xl font-serif text-[#1A1A1A] font-semibold">
+                      Verify Your Mobile Number
+                    </h2>
+                    <p className="text-xs text-[#666666]">
+                      Enter the 6-digit WhatsApp OTP sent to <span className="font-semibold text-stone-900">{maskedPhone}</span> to activate your account.
+                    </p>
+                  </div>
+
+                  <form onSubmit={handleVerifyRegOtp} className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-semibold text-[#1A1A1A] uppercase tracking-wider mb-1">
+                        6-Digit WhatsApp OTP
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        maxLength={6}
+                        placeholder="123456"
+                        value={regOtpInput}
+                        onChange={(e) => setRegOtpInput(e.target.value.replace(/\D/g, ''))}
+                        className="w-full bg-[#FDFCFB] border border-stone-200 px-4 py-3 text-center text-xl font-mono tracking-widest text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                      />
+                      <p className="text-[11px] text-stone-500 mt-1.5 flex items-center justify-between">
+                        <span>Valid for 10 minutes</span>
+                        {cooldown > 0 ? (
+                          <span className="text-[#C5A059] font-medium">Resend in {cooldown}s</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleResendRegOtp}
+                            disabled={loading}
+                            className="text-[#C5A059] hover:underline font-semibold cursor-pointer"
+                          >
+                            Resend OTP
+                          </button>
+                        )}
+                      </p>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={loading || regOtpInput.length !== 6}
+                      className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold py-3.5 px-6 transition-colors shadow-sm flex items-center justify-center gap-2 cursor-pointer text-[11px] uppercase tracking-[0.2em] disabled:opacity-50"
+                    >
+                      <ShieldCheck className="w-4 h-4 text-[#C5A059]" />
+                      <span>{loading ? 'Verifying...' : 'VERIFY & ACTIVATE ACCOUNT'}</span>
+                    </button>
+
+                    <div className="text-center pt-2">
+                      <button
+                        type="button"
+                        onClick={() => { setRegStep('form'); setError(null); }}
+                        className="text-xs text-stone-500 hover:text-stone-800 underline cursor-pointer"
+                      >
+                        &larr; Edit registration details
+                      </button>
+                    </div>
+                  </form>
                 </div>
-              </form>
+              )}
             </div>
           )}
 
@@ -875,6 +1060,21 @@ export const MyAccountPage: React.FC<MyAccountPageProps> = ({ onOpenBookingModal
                       onChange={(e) => setOtpInput(e.target.value.replace(/\D/g, ''))}
                       className="w-full bg-[#FDFCFB] border border-stone-200 px-4 py-3 text-center text-xl font-mono tracking-widest text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
                     />
+                    <p className="text-[11px] text-stone-500 mt-1.5 flex items-center justify-between">
+                      <span>Valid for 10 minutes</span>
+                      {cooldown > 0 ? (
+                        <span className="text-[#C5A059] font-medium">Resend in {cooldown}s</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleRequestOtp()}
+                          disabled={loading}
+                          className="text-[#C5A059] hover:underline font-semibold cursor-pointer"
+                        >
+                          Resend OTP
+                        </button>
+                      )}
+                    </p>
                   </div>
 
                   <button

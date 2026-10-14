@@ -1026,10 +1026,13 @@ export const ImageManagementTab: React.FC = () => {
                     >
                       {/* Image Thumbnail with Overlay controls */}
                       <div className="relative h-48 bg-stone-100 overflow-hidden group">
-                        <img
+                        <ManagedImageDisplay
                           src={img.imageUrl}
                           alt={img.title || 'Room photo'}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          fallbackType={selectedRoomForGallery === 'family' ? 'family' : 'deluxe'}
+                          isAdmin={true}
+                          onReplaceClick={() => openReplaceModal(img)}
                         />
 
                         {/* Badges */}
@@ -1209,10 +1212,13 @@ export const ImageManagementTab: React.FC = () => {
                   >
                     {/* Image Thumbnail */}
                     <div className="relative h-48 bg-stone-100 overflow-hidden group">
-                      <img
+                      <ManagedImageDisplay
                         src={img.imageUrl}
                         alt={img.title || img.category}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        fallbackType="hotel"
+                        isAdmin={true}
+                        onReplaceClick={() => openReplaceModal(img)}
                       />
 
                       {/* Category & Property Badges */}
@@ -1420,10 +1426,13 @@ export const ImageManagementTab: React.FC = () => {
                   >
                     {/* Thumbnail */}
                     <div className="relative h-48 bg-stone-100 overflow-hidden group">
-                      <img
+                      <ManagedImageDisplay
                         src={img.imageUrl}
                         alt={img.title || 'Interior photo'}
                         className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        fallbackType="deluxe"
+                        isAdmin={true}
+                        onReplaceClick={() => openReplaceModal(img)}
                       />
 
                       {/* Badges */}

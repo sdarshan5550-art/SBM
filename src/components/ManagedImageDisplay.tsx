@@ -21,6 +21,10 @@ export const ManagedImageDisplay: React.FC<ManagedImageDisplayProps> = ({
 }) => {
   const [hasError, setHasError] = useState(false);
 
+  React.useEffect(() => {
+    setHasError(false);
+  }, [src]);
+
   const getFallbackSrc = () => {
     switch (fallbackType) {
       case 'deluxe':

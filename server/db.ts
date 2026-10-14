@@ -959,7 +959,7 @@ function getInitialManagedImages(now: string): ManagedImage[] {
     // Food
     {
       id: 'img-hotel-food-1',
-      imageUrl: 'https://images.unsplash.com/photo-1613292443284-c7702f2c7a9c?auto=format&fit=crop&w=1200&q=80',
+      imageUrl: 'https://images.unsplash.com/photo-1626777552726-4a6b54c97e46?auto=format&fit=crop&w=1200&q=80',
       title: 'Traditional Rajasthani Thali & Refreshments',
       description: 'Freshly prepared pure vegetarian meals, chai, and breakfast for pilgrims',
       category: 'Food',
@@ -1025,15 +1025,8 @@ class DatabaseService {
             }
           }
         }
-        if (!parsed.managed_images || parsed.managed_images.length === 0) {
-          parsed.managed_images = getInitialManagedImages(new Date().toISOString());
-        } else {
-          // If existing database does not have Property Cover images, inject initial ones
-          const hasPropertyCovers = parsed.managed_images.some(img => img.category === 'Property Cover');
-          if (!hasPropertyCovers) {
-            const initialCovers = getInitialManagedImages(new Date().toISOString()).filter(img => img.category === 'Property Cover');
-            parsed.managed_images = [...initialCovers, ...parsed.managed_images];
-          }
+        if (!Array.isArray(parsed.managed_images)) {
+          parsed.managed_images = [];
         }
 
         if (parsed.settings) {
@@ -3419,7 +3412,7 @@ if (updates.price !== undefined) {
   // --- IMAGE MANAGEMENT ---
   public getManagedImages(filters?: { category?: string; roomId?: string; propertyId?: string; status?: string; includeInactive?: boolean }): ManagedImage[] {
     if (!this.data.managed_images) {
-      this.data.managed_images = getInitialManagedImages(new Date().toISOString());
+      this.data.managed_images = [];
     }
 
     // Sanitize / normalize all managed images to ensure no blob URLs or invalid URLs are returned or stored
@@ -3490,7 +3483,7 @@ if (updates.price !== undefined) {
 
   public addManagedImage(imageData: Omit<ManagedImage, 'id' | 'createdAt' | 'updatedAt'>): ManagedImage {
     if (!this.data.managed_images) {
-      this.data.managed_images = getInitialManagedImages(new Date().toISOString());
+      this.data.managed_images = [];
     }
 
     let cleanUrl = imageData.imageUrl;

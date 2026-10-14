@@ -182,8 +182,13 @@ export const api = {
       request<{
         success: boolean;
         message: string;
-        token: string;
-        customer: any;
+        token?: string;
+        customer?: any;
+        requiresOtp?: boolean;
+        phone?: string;
+        maskedPhone?: string;
+        cooldownSeconds?: number;
+        notConfigured?: boolean;
       }>('/api/customer/auth/register', {
         method: 'POST',
         body: JSON.stringify(data)
