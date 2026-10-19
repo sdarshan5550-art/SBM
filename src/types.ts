@@ -216,6 +216,98 @@ export interface Booking {
   whatsapp_sent_at?: string;
   whatsapp_message_id?: string;
   whatsapp_error?: string;
+  parent_booking_id?: string;
+  booking_group_id?: string;
+  is_combined_booking?: boolean;
+  gateway_provider?: string;
+  gateway_merchant_id?: string;
+  bank_account_name?: string;
+}
+
+export type PaymentGatewayProviderType = 'razorpay' | 'phonepe' | 'cashfree' | 'stripe';
+
+export interface PropertyGatewayConfig {
+  property_code: PropertyCode;
+  property_name: string;
+  provider: PaymentGatewayProviderType;
+  merchant_id: string;
+  bank_account_name: string;
+  settlement_account_number: string;
+  is_configured: boolean;
+  mode: 'test' | 'live' | 'unconfigured';
+  key_id: string;
+  key_secret?: string;
+  webhook_secret?: string;
+  webhook_url: string;
+  masked_key_id: string;
+  has_secret: boolean;
+  has_webhook_secret: boolean;
+}
+
+export interface PaymentTransactionRecord {
+  id: string;
+  booking_id: string;
+  booking_number: string;
+  booking_group_id?: string;
+  property_code: PropertyCode;
+  property_name: string;
+  gateway_provider: PaymentGatewayProviderType | string;
+  merchant_id?: string;
+  order_id: string;
+  transaction_id?: string;
+  signature?: string;
+  amount: number;
+  amount_in_paise?: number;
+  currency: string;
+  status: 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED' | 'PARTIALLY_REFUNDED' | 'EXPIRED' | 'CANCELLED';
+  bank_account_hint?: string;
+  payment_method_type?: string;
+  error_code?: string;
+  error_description?: string;
+  idempotency_key?: string;
+  refund_id?: string;
+  refund_amount?: number;
+  refund_reason?: string;
+  refund_status?: string;
+  refunded_at?: string;
+  verified_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CombinedBookingGroup {
+  id: string;
+  group_booking_number: string;
+  guest_name: string;
+  guest_phone: string;
+  guest_email: string;
+  check_in: string;
+  check_out: string;
+  total_nights: number;
+  total_rooms: number;
+  total_subtotal: number;
+  total_discount: number;
+  total_tax: number;
+  total_amount: number;
+  total_paid: number;
+  payment_status: 'Pending' | 'Partially Paid' | 'Paid' | 'Failed' | 'Refunded';
+  booking_status: 'Pending' | 'Confirmed' | 'Cancelled';
+  bookings: {
+    property_code: PropertyCode;
+    property_name: string;
+    booking_id: string;
+    booking_number: string;
+    room_name: string;
+    rooms_count: number;
+    amount: number;
+    payment_status: 'Pending' | 'Paid' | 'Failed';
+    gateway_provider: string;
+    order_id?: string;
+    payment_txn_id?: string;
+    bank_account_name?: string;
+  }[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PMSCalendarData {

@@ -162,12 +162,12 @@ export const AboutPage: React.FC = () => {
               <div className="space-y-1">
                 <strong className="block text-[#C5A059] font-serif text-sm">SBM Hotel</strong>
                 <p className="text-[#666666]">Main Temple Road, adjacent to Balaji Mandir</p>
-                <p className="text-[#1A1A1A] font-mono">+91 99835 67921</p>
+                <p className="text-[#1A1A1A] font-mono">+91 99835 67921, +91 98285 23333</p>
               </div>
               <div className="space-y-1">
                 <strong className="block text-[#C5A059] font-serif text-sm">SBM 2 Guest House</strong>
                 <p className="text-[#666666]">Near Temple Approach Road, quiet location</p>
-                <p className="text-[#1A1A1A] font-mono">+91 98285 00845, +91 98286 36000</p>
+                <p className="text-[#1A1A1A] font-mono">+91 98285 00845, +91 98285 00855</p>
               </div>
             </div>
           </div>

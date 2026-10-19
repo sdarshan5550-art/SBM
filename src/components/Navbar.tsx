@@ -69,7 +69,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, setCurrentTab, onOpe
             </span>
             <span className="flex items-center gap-1.5 hover:text-[#C5A059] transition-colors">
               <Phone className="w-3.5 h-3.5 text-[#C5A059]" />
-              SBM Hotel: +91 99835 67921 | SBM 2 Guest House: +91 98285 00845, +91 98286 36000
+              SBM Hotel: +91 99835 67921, +91 98285 23333 | SBM 2 Guest House: +91 98285 00845, +91 98285 00855
             </span>
           </div>
           

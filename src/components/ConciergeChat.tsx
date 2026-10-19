@@ -81,7 +81,7 @@ export const ConciergeChat: React.FC<ConciergeChatProps> = ({ onSelectBookingRoo
         {
           id: `ai-err-${Date.now()}`,
           sender: 'ai',
-          text: "I don't have that information available right now. Please contact SBM Hotel directly at **+91 99835 67921** or **+91 98285 00845** for assistance.",
+          text: "I don't have that information available right now. Please contact SBM Hotel directly at **+91 99835 67921** / **+91 98285 23333** or SBM 2 Guest House at **+91 98285 00845** / **+91 98285 00855** for assistance.",
           timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
         }
       ]);

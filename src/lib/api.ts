@@ -28,7 +28,11 @@ import {
   Coupon,
   CouponUsage,
   CouponValidateResult,
-  CouponStatus
+  CouponStatus,
+  PropertyGatewayConfig,
+  PaymentTransactionRecord,
+  CombinedBookingGroup,
+  PropertyCode
 } from '../types';
 
 const ADMIN_TOKEN_KEY = 'sbm_admin_token';
@@ -233,14 +237,22 @@ export const api = {
       body: JSON.stringify(params)
     }),
 
-  // Razorpay Payments API
-  getPaymentConfig: () => request<{ key_id: string; is_configured: boolean; mode: 'test' | 'live'; currency: string }>('/api/payments/config'),
+  // Multi-Property Payments API (SBM 1 & SBM 2)
+  getPaymentConfig: (propertyCode?: PropertyCode) =>
+    request<any>(propertyCode ? `/api/payments/config/${propertyCode}` : '/api/payments/config'),
+
   createPaymentOrder: (payload: any) => request<{
     success: boolean;
     order_id: string;
+    provider: string;
     amount: number;
     currency: string;
     key_id: string;
+    property_code: PropertyCode;
+    property_name: string;
+    bank_account_name: string;
+    settlement_account_hint?: string;
+    payment_url?: string;
     booking_id: string;
     booking_number: string;
     total_amount: number;
@@ -249,11 +261,15 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
+
   verifyPayment: (payload: {
     booking_id: string;
-    razorpay_order_id: string;
-    razorpay_payment_id: string;
-    razorpay_signature: string;
+    razorpay_order_id?: string;
+    razorpay_payment_id?: string;
+    razorpay_signature?: string;
+    order_id?: string;
+    transaction_id?: string;
+    signature?: string;
   }) => request<{
     success: boolean;
     message: string;
@@ -262,9 +278,11 @@ export const api = {
     method: 'POST',
     body: JSON.stringify(payload)
   }),
+
   recordPaymentFailure: (payload: {
     booking_id: string;
     razorpay_order_id?: string;
+    order_id?: string;
     error_code?: string;
     error_description?: string;
   }) => request<{
@@ -272,6 +290,109 @@ export const api = {
     message: string;
     booking?: Booking;
   }>('/api/payments/failure', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
+  // Combined Bookings Multi-Property API
+  createCombinedPaymentOrders: (payload: {
+    guest_name: string;
+    guest_phone: string;
+    guest_email: string;
+    check_in: string;
+    check_out: string;
+    special_request?: string;
+    coupon_code?: string;
+    items: Array<{
+      property_code: PropertyCode;
+      room_type_id: string;
+      rooms: number;
+      adults?: number;
+      children?: number;
+    }>;
+  }) => request<{
+    success: boolean;
+    group_id: string;
+    group_booking_number: string;
+    total_amount: number;
+    total_nights: number;
+    total_rooms: number;
+    property_orders: Array<{
+      property_code: PropertyCode;
+      property_name: string;
+      booking_id: string;
+      booking_number: string;
+      amount: number;
+      amount_in_paise: number;
+      currency: string;
+      gateway_provider: string;
+      order_id: string;
+      key_id: string;
+      bank_account_name: string;
+      settlement_account_hint?: string;
+      payment_url?: string;
+      payment_status: 'Pending' | 'Paid' | 'Failed';
+    }>;
+  }>('/api/payments/combined/create-orders', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
+  verifyCombinedPayment: (payload: {
+    group_id: string;
+    booking_id: string;
+    property_code: PropertyCode;
+    order_id: string;
+    transaction_id: string;
+    signature?: string;
+  }) => request<{
+    success: boolean;
+    message: string;
+    all_paid: boolean;
+    group: CombinedBookingGroup;
+    booking: Booking;
+  }>('/api/payments/combined/verify', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  }),
+
+  getCombinedBookingStatus: (groupId: string) =>
+    request<CombinedBookingGroup>(`/api/payments/combined/status/${groupId}`),
+
+  // Admin Payment & Gateway Management
+  adminGetGatewayConfigs: () =>
+    request<Record<PropertyCode, PropertyGatewayConfig>>('/api/admin/payments/gateway-configs'),
+
+  adminUpdateGatewayConfig: (propertyCode: PropertyCode, updates: Partial<PropertyGatewayConfig>) =>
+    request<PropertyGatewayConfig>(`/api/admin/payments/gateway-configs/${propertyCode}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates)
+    }),
+
+  adminGetPaymentTransactions: (filters?: {
+    property_code?: string;
+    status?: string;
+    provider?: string;
+    booking_id?: string;
+    booking_group_id?: string;
+  }) => {
+    const params = new URLSearchParams();
+    if (filters?.property_code) params.set('property_code', filters.property_code);
+    if (filters?.status) params.set('status', filters.status);
+    if (filters?.provider) params.set('provider', filters.provider);
+    if (filters?.booking_id) params.set('booking_id', filters.booking_id);
+    if (filters?.booking_group_id) params.set('booking_group_id', filters.booking_group_id);
+    const q = params.toString() ? `?${params.toString()}` : '';
+    return request<PaymentTransactionRecord[]>(`/api/admin/payments/transactions${q}`);
+  },
+
+  adminProcessRefund: (payload: {
+    transaction_id?: string;
+    order_id?: string;
+    property_code: PropertyCode;
+    amount: number;
+    reason?: string;
+  }) => request<{ success: boolean; message: string; refund: any }>('/api/admin/payments/refund', {
     method: 'POST',
     body: JSON.stringify(payload)
   }),

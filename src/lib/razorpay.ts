@@ -82,6 +82,18 @@ export interface RazorpayOptions {
 }
 
 export const openRazorpayCheckout = async (options: RazorpayOptions): Promise<any> => {
+  // Sandbox dev simulation when using demo order ID
+  if (options.order_id.startsWith('order_sim_')) {
+    console.log('[Payment Sandbox] Simulating payment checkout for demo order:', options.order_id);
+    await new Promise(r => setTimeout(r, 600));
+    options.handler({
+      razorpay_order_id: options.order_id,
+      razorpay_payment_id: `pay_sim_${Date.now()}`,
+      razorpay_signature: `sig_sim_${Date.now()}`
+    });
+    return { simulated: true };
+  }
+
   const isLoaded = await loadRazorpayScript();
   if (!isLoaded || !window.Razorpay) {
     throw new Error('Could not load Razorpay payment gateway checkout interface. Please check your internet connection and try again.');

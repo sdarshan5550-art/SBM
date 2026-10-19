@@ -39,7 +39,10 @@ import {
   SocialMediaSettings,
   Coupon,
   CouponUsage,
-  CouponValidateResult
+  CouponValidateResult,
+  PaymentTransactionRecord,
+  CombinedBookingGroup,
+  PropertyGatewayConfig
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
 import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
@@ -95,6 +98,9 @@ interface DatabaseData {
   pending_external_events?: PendingExternalEvent[];
   coupons?: Coupon[];
   coupon_usage?: CouponUsage[];
+  property_gateway_configs?: Record<string, any>;
+  payment_transactions?: PaymentTransactionRecord[];
+  combined_booking_groups?: CombinedBookingGroup[];
 }
 
 const currentFilename = typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url);
@@ -133,7 +139,7 @@ function getInitialData(): DatabaseData {
       tagline: 'Adjacent to Salasar Balaji Temple',
       description: 'Experience unmatched spiritual serenity and hospitality in the heart of Salasar, right next to the holy temple.',
       address: 'Main Temple Road, Opposite Salasar Balaji Temple, Salasar, Rajasthan 331506',
-      phone: '+91 99835 67921',
+      phone: '+91 99835 67921, +91 98285 23333',
       landline: '01568 252186',
       email: 'sbmhotel@gmail.com',
       images: PROPERTY_PHOTOS.sbmHotel,
@@ -156,7 +162,7 @@ function getInitialData(): DatabaseData {
       tagline: 'Quiet Comfort near Temple Approach',
       description: 'Peaceful accommodation with modern amenities designed for families and group pilgrims visiting Salasar.',
       address: 'Near Temple Approach Road, Salasar, Rajasthan 331506',
-      phone: '+91 98285 00845, +91 98286 36000',
+      phone: '+91 98285 00845, +91 98285 00855',
       landline: '01568 294286',
       email: 'sbmguesthouse@gmail.com',
       images: PROPERTY_PHOTOS.sbmGuestHouse,
@@ -1069,6 +1075,16 @@ class DatabaseService {
               room.facilities = ['Wi-Fi', 'Air Conditioning'];
             }
           }
+        }
+
+        if (!parsed.property_gateway_configs) {
+          parsed.property_gateway_configs = {};
+        }
+        if (!parsed.payment_transactions) {
+          parsed.payment_transactions = [];
+        }
+        if (!parsed.combined_booking_groups) {
+          parsed.combined_booking_groups = [];
         }
 
         return parsed;
@@ -4231,6 +4247,150 @@ if (updates.price !== undefined) {
   public getCouponUsage(couponId: string): CouponUsage[] {
     if (!this.data.coupon_usage) this.data.coupon_usage = [];
     return this.data.coupon_usage.filter(u => u.coupon_id === couponId);
+  }
+
+  // --- MULTI-PROPERTY PAYMENT GATEWAY & TRANSACTION METHODS ---
+  public getPropertyGatewayConfigs(): Record<string, any> {
+    if (!this.data.property_gateway_configs) {
+      this.data.property_gateway_configs = {};
+    }
+    return this.data.property_gateway_configs;
+  }
+
+  public updatePropertyGatewayConfig(propertyCode: string, config: any): any {
+    if (!this.data.property_gateway_configs) {
+      this.data.property_gateway_configs = {};
+    }
+    this.data.property_gateway_configs[propertyCode] = {
+      ...(this.data.property_gateway_configs[propertyCode] || {}),
+      ...config,
+      updated_at: new Date().toISOString()
+    };
+    this.save();
+    return this.data.property_gateway_configs[propertyCode];
+  }
+
+  public createPaymentTransaction(tx: PaymentTransactionRecord): PaymentTransactionRecord {
+    if (!this.data.payment_transactions) {
+      this.data.payment_transactions = [];
+    }
+    const existing = this.data.payment_transactions.find(
+      t => t.id === tx.id || (t.order_id === tx.order_id && t.property_code === tx.property_code)
+    );
+    if (existing) {
+      return existing;
+    }
+    this.data.payment_transactions.unshift(tx);
+    this.save();
+    return tx;
+  }
+
+  public getPaymentTransactions(filters?: {
+    property_code?: string;
+    status?: string;
+    provider?: string;
+    booking_id?: string;
+    booking_group_id?: string;
+  }): PaymentTransactionRecord[] {
+    if (!this.data.payment_transactions) {
+      this.data.payment_transactions = [];
+    }
+    let list = [...this.data.payment_transactions];
+    if (filters?.property_code && filters.property_code !== 'all') {
+      list = list.filter(t => t.property_code === filters.property_code);
+    }
+    if (filters?.status && filters.status !== 'all') {
+      list = list.filter(t => t.status === filters.status);
+    }
+    if (filters?.provider && filters.provider !== 'all') {
+      list = list.filter(t => t.gateway_provider === filters.provider);
+    }
+    if (filters?.booking_id) {
+      list = list.filter(t => t.booking_id === filters.booking_id);
+    }
+    if (filters?.booking_group_id) {
+      list = list.filter(t => t.booking_group_id === filters.booking_group_id);
+    }
+    return list;
+  }
+
+  public getPaymentTransactionById(id: string): PaymentTransactionRecord | undefined {
+    if (!this.data.payment_transactions) return undefined;
+    return this.data.payment_transactions.find(t => t.id === id);
+  }
+
+  public getPaymentTransactionByOrderId(orderId: string): PaymentTransactionRecord | undefined {
+    if (!this.data.payment_transactions) return undefined;
+    return this.data.payment_transactions.find(t => t.order_id === orderId);
+  }
+
+  public getPaymentTransactionByTxnId(txnId: string): PaymentTransactionRecord | undefined {
+    if (!this.data.payment_transactions) return undefined;
+    return this.data.payment_transactions.find(t => t.transaction_id === txnId);
+  }
+
+  public updatePaymentTransaction(
+    idOrOrderId: string,
+    updates: Partial<PaymentTransactionRecord>
+  ): PaymentTransactionRecord | undefined {
+    if (!this.data.payment_transactions) return undefined;
+    const idx = this.data.payment_transactions.findIndex(
+      t => t.id === idOrOrderId || t.order_id === idOrOrderId
+    );
+    if (idx === -1) return undefined;
+
+    this.data.payment_transactions[idx] = {
+      ...this.data.payment_transactions[idx],
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    this.save();
+    return this.data.payment_transactions[idx];
+  }
+
+  // --- COMBINED BOOKING GROUPS ---
+  public createCombinedBookingGroup(group: CombinedBookingGroup): CombinedBookingGroup {
+    if (!this.data.combined_booking_groups) {
+      this.data.combined_booking_groups = [];
+    }
+    const existing = this.data.combined_booking_groups.find(g => g.id === group.id);
+    if (existing) {
+      return existing;
+    }
+    this.data.combined_booking_groups.unshift(group);
+    this.save();
+    return group;
+  }
+
+  public getCombinedBookingGroup(idOrNumber: string): CombinedBookingGroup | undefined {
+    if (!this.data.combined_booking_groups) return undefined;
+    return this.data.combined_booking_groups.find(
+      g => g.id === idOrNumber || g.group_booking_number === idOrNumber
+    );
+  }
+
+  public getCombinedBookingGroups(): CombinedBookingGroup[] {
+    if (!this.data.combined_booking_groups) return [];
+    return this.data.combined_booking_groups;
+  }
+
+  public updateCombinedBookingGroup(
+    id: string,
+    updates: Partial<CombinedBookingGroup>
+  ): CombinedBookingGroup | undefined {
+    if (!this.data.combined_booking_groups) return undefined;
+    const idx = this.data.combined_booking_groups.findIndex(
+      g => g.id === id || g.group_booking_number === id
+    );
+    if (idx === -1) return undefined;
+
+    this.data.combined_booking_groups[idx] = {
+      ...this.data.combined_booking_groups[idx],
+      ...updates,
+      updated_at: new Date().toISOString()
+    };
+    this.save();
+    return this.data.combined_booking_groups[idx];
   }
 }
 

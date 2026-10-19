@@ -83,7 +83,7 @@ export const BookingVoucher: React.FC<BookingVoucherProps> = ({
             <p className="text-xs text-stone-600 flex items-center gap-2 min-w-0">
               <Phone className="w-3.5 h-3.5 text-amber-600 shrink-0" />
               <span className="break-words">
-                {property?.phone || (booking.property_code === 'sbm-guest-house' ? '+91 98285 00845' : '+91 99835 67921')}
+                {property?.phone || (booking.property_code === 'sbm-guest-house' ? '+91 98285 00845, +91 98285 00855' : '+91 99835 67921, +91 98285 23333')}
               </span>
             </p>
             <p className="text-xs text-stone-600 flex items-center gap-2 min-w-0">
@@ -189,14 +189,22 @@ export const BookingVoucher: React.FC<BookingVoucherProps> = ({
               <div className="min-w-0">
                 <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Payment Method:</span>
                 <span className="font-semibold text-[#1A1A1A] break-words">
-                  {booking.payment_method === 'online_razorpay'
+                  {booking.payment_method?.startsWith('online_')
+                    ? `${(booking.gateway_provider || 'Online').toUpperCase()} Gateway Payment`
+                    : booking.payment_method === 'online_razorpay'
                     ? 'Razorpay Standard Checkout (Online)'
                     : 'Pay at Reception'}
                 </span>
               </div>
+              <div className="min-w-0">
+                <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Settlement Bank Account:</span>
+                <span className="font-semibold text-emerald-800 break-words">
+                  {booking.bank_account_name || (booking.property_code === 'sbm-guest-house' ? 'SBM 2 Guest House Current A/C (ICICI Bank)' : 'SBM Hotel Current A/C (HDFC Bank)')}
+                </span>
+              </div>
               {booking.razorpay_payment_id || booking.payment_txn_id ? (
                 <div className="min-w-0">
-                  <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Payment ID:</span>
+                  <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Transaction ID:</span>
                   <span className="font-mono font-bold text-emerald-700 break-all">
                     {booking.razorpay_payment_id || booking.payment_txn_id}
                   </span>
@@ -204,13 +212,13 @@ export const BookingVoucher: React.FC<BookingVoucherProps> = ({
               ) : null}
               {booking.razorpay_order_id ? (
                 <div className="min-w-0">
-                  <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Order ID:</span>
+                  <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Gateway Order ID:</span>
                   <span className="font-mono text-[#1A1A1A] break-all">{booking.razorpay_order_id}</span>
                 </div>
               ) : null}
               {booking.payment_verified_at ? (
                 <div className="min-w-0">
-                  <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Paid On:</span>
+                  <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Settled & Verified At:</span>
                   <span className="text-[#1A1A1A]">
                     {new Date(booking.payment_verified_at).toLocaleString('en-IN')}
                   </span>
@@ -241,7 +249,7 @@ export const BookingVoucher: React.FC<BookingVoucherProps> = ({
       {/* Action Buttons (Hidden when printing) */}
       <div className="bg-stone-100 px-4 sm:px-6 py-3.5 border-t border-stone-200 flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3 print:hidden shrink-0">
         <div className="text-xs text-stone-500 text-center sm:text-left">
-          Need help? Call <strong className="text-stone-800 whitespace-nowrap">+91 99835 67921</strong>
+          Need help? Call <strong className="text-stone-800 whitespace-nowrap">+91 99835 67921 / +91 98285 23333</strong>
         </div>
 
         <div className="flex items-center justify-end gap-2 w-full sm:w-auto">

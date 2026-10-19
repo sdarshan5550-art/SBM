@@ -280,8 +280,8 @@ export default function App() {
             <div className="space-y-2.5 text-xs">
               <h4 className="font-semibold text-[#C5A059] uppercase tracking-[0.2em] text-[11px]">Reservations & Help</h4>
               <div className="space-y-2 text-white/60">
-                <p><strong className="text-white/80">SBM Hotel:</strong> +91 99835 67921</p>
-                <p><strong className="text-white/80">SBM 2 Guest House:</strong> +91 98285 00845, +91 98286 36000</p>
+                <p><strong className="text-white/80">SBM Hotel:</strong> +91 99835 67921, +91 98285 23333</p>
+                <p><strong className="text-white/80">SBM 2 Guest House:</strong> +91 98285 00845, +91 98285 00855</p>
                 <p><strong className="text-white/80">Email:</strong> sbmhotel@gmail.com, sbmguesthouse@gmail.com</p>
                 <p><strong className="text-white/80">Location:</strong> Salasar, Rajasthan 331506</p>
               </div>

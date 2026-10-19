@@ -101,7 +101,7 @@ export const ContactPage: React.FC = () => {
               <Phone className="w-4 h-4 text-[#C5A059] shrink-0 mt-0.5" />
               <div>
                 <strong className="block text-[#1A1A1A]">Phone Numbers:</strong>
-                <p>Mobile: <a href="tel:+919983567921" className="text-[#C5A059] hover:underline font-medium">+91 99 83 56 79 21</a></p>
+                <p>Mobile: <a href="tel:+919983567921" className="text-[#C5A059] hover:underline font-medium">+91 99835 67921</a>, <a href="tel:+919828523333" className="text-[#C5A059] hover:underline font-medium">+91 98285 23333</a></p>
                 <p>Landline: <a href="tel:01568252186" className="text-[#1A1A1A]">01568 25 21 86</a></p>
               </div>
             </div>
@@ -139,7 +139,7 @@ export const ContactPage: React.FC = () => {
               <Phone className="w-4 h-4 text-[#C5A059] shrink-0 mt-0.5" />
               <div>
                 <strong className="block text-[#1A1A1A]">Phone Numbers:</strong>
-                <p>Mobile: <a href="tel:+919828500845" className="text-[#C5A059] hover:underline font-medium">+91 98285 00845</a>, <a href="tel:+919828636000" className="text-[#C5A059] hover:underline font-medium">+91 98286 36000</a></p>
+                <p>Mobile: <a href="tel:+919828500845" className="text-[#C5A059] hover:underline font-medium">+91 98285 00845</a>, <a href="tel:+919828500855" className="text-[#C5A059] hover:underline font-medium">+91 98285 00855</a></p>
                 <p>Landline: <a href="tel:01568294286" className="text-[#1A1A1A]">01568 294 286</a></p>
               </div>
             </div>
