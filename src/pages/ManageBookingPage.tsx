@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Search, CalendarCheck, AlertCircle, ShieldCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import { Booking } from '../types';
@@ -10,6 +10,25 @@ export const ManageBookingPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [booking, setBooking] = useState<Booking | null>(null);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const bNum = params.get('booking_number');
+    if (bNum) {
+      setBookingNumber(bNum.trim());
+      setLoading(true);
+      api.lookupBooking(bNum.trim())
+        .then((res) => {
+          setBooking(res);
+        })
+        .catch((err: any) => {
+          setError(err.message || 'Booking not found.');
+        })
+        .finally(() => {
+          setLoading(false);
+        });
+    }
+  }, []);
 
   const handleSearchBooking = async (e: React.FormEvent) => {
     e.preventDefault();

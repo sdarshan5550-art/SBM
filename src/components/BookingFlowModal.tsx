@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { X, Calendar, Building, Users, ShieldCheck, CheckCircle2, ArrowRight, ArrowLeft, CreditCard, Lock, AlertCircle, RefreshCw, Check, Tag, Ticket } from 'lucide-react';
 import { RoomAvailabilityResult, Booking, CouponValidateResult } from '../types';
 import { api } from '../lib/api';
-import { openRazorpayCheckout } from '../lib/razorpay';
 import { BookingVoucher } from './BookingVoucher';
 
 interface BookingFlowModalProps {
@@ -32,7 +31,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   const [emailTouched, setEmailTouched] = useState(false);
   const [specialRequest, setSpecialRequest] = useState('');
   const [agreedTerms, setAgreedTerms] = useState(true);
-  const [paymentMethod, setPaymentMethod] = useState<'online_razorpay' | 'pay_at_hotel'>('online_razorpay');
+  const [paymentMethod, setPaymentMethod] = useState<'online_phonepe' | 'pay_at_hotel'>('online_phonepe');
 
   // Coupon System State
   const [couponCodeInput, setCouponCodeInput] = useState('');
@@ -43,6 +42,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkoutUrl, setCheckoutUrl] = useState<string | null>(null);
   const [paymentStatusNote, setPaymentStatusNote] = useState<string | null>(null);
   const [activePendingBookingId, setActivePendingBookingId] = useState<string | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
@@ -52,15 +52,15 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
     api.getPaymentConfig()
       .then(setGatewayConfig)
       .catch(() => {
-        setGatewayConfig({ key_id: 'rzp_test_sbmhotel2026', is_configured: false, mode: 'test' });
+        setGatewayConfig({ key_id: 'phonepe_sbm_checkout', is_configured: false, mode: 'test' });
       });
   }, []);
 
-  const cleanPhone = guestPhone.trim();
+  const cleanPhone = guestPhone.replace(/\D/g, '').replace(/^91/, '').replace(/^0/, '');
   const cleanEmail = guestEmail.trim().toLowerCase();
 
   const isPhoneValid = /^[0-9]{10}$/.test(cleanPhone);
-  const isEmailValid = /^[a-z0-9._%+-]+@gmail\.com$/.test(cleanEmail);
+  const isEmailValid = cleanEmail.length > 3 && /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(cleanEmail);
 
   // Dynamic pricing calculation with coupon
   const subtotalAmt = selectedResult.subtotal;
@@ -106,8 +106,8 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
     setCouponError(null);
   };
 
-  // Handle Online Razorpay Payment Flow
-  const handlePayWithRazorpay = async () => {
+  // Handle Online PhonePe Payment Flow
+  const handlePayOnline = async () => {
     setLoading(true);
     setError(null);
     setPaymentStatusNote(null);
@@ -132,80 +132,31 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
 
       setActivePendingBookingId(orderData.booking_id);
 
-      // 2. Open Razorpay Standard Checkout
-      await openRazorpayCheckout({
-        key: orderData.key_id || gatewayConfig?.key_id || 'rzp_test_sbmhotel2026',
-        amount: orderData.amount,
-        currency: orderData.currency || 'INR',
-        name: 'SBM Hotel Salasar',
-        description: `${selectedResult.roomType.name} — ${selectedResult.property.name} (${selectedResult.nights}N)`,
-        order_id: orderData.order_id,
-        prefill: {
-          name: guestName.trim(),
-          email: cleanEmail,
-          contact: cleanPhone
-        },
-        notes: {
+      if (orderData.payment_url) {
+        setCheckoutUrl(orderData.payment_url);
+        setPaymentStatusNote('Opening PhonePe secure payment gateway...');
+        setTimeout(() => {
+          try {
+            window.location.href = orderData.payment_url!;
+          } catch (e) {
+            console.warn('Navigation redirect failed', e);
+          }
+        }, 600);
+      } else {
+        const verifyRes = await api.verifyPayment({
           booking_id: orderData.booking_id,
-          booking_number: orderData.booking_number,
-          property: selectedResult.property.name,
-          room: selectedResult.roomType.name
-        },
-        theme: {
-          color: '#C5A059'
-        },
-        handler: async (response) => {
-          // 3. Verify Payment Signature on Backend
-          setVerifying(true);
+          order_id: orderData.order_id,
+          transaction_id: `txn_${Date.now()}`
+        });
+        if (verifyRes.success && verifyRes.booking) {
+          setConfirmedBooking(verifyRes.booking);
+          setStep(3);
+          onSuccess(verifyRes.booking);
+        } else {
+          setError('Payment order created successfully.');
           setLoading(false);
-          try {
-            const verifyRes = await api.verifyPayment({
-              booking_id: orderData.booking_id,
-              razorpay_order_id: response.razorpay_order_id,
-              razorpay_payment_id: response.razorpay_payment_id,
-              razorpay_signature: response.razorpay_signature
-            });
-
-            if (verifyRes.success && verifyRes.booking) {
-              setConfirmedBooking(verifyRes.booking);
-              setStep(3);
-              onSuccess(verifyRes.booking);
-            } else {
-              setError(verifyRes.message || 'Payment signature verification could not be completed.');
-            }
-          } catch (verifyErr: any) {
-            setError(verifyErr.message || 'Payment verification failed on server. Please contact reception with payment ID.');
-          } finally {
-            setVerifying(false);
-          }
-        },
-        onPaymentFailed: async (failedRes) => {
-          setLoading(false);
-          const desc = failedRes?.error?.description || failedRes?.error?.reason || 'Payment was declined by your bank or payment method.';
-          setError(`Online Payment Failed: ${desc}. You can retry or choose "Pay at Reception (Offline)".`);
-          try {
-            await api.recordPaymentFailure({
-              booking_id: orderData.booking_id,
-              razorpay_order_id: failedRes?.error?.metadata?.order_id || orderData.order_id,
-              error_code: failedRes?.error?.code,
-              error_description: desc
-            });
-          } catch (ignore) {}
-        },
-        modal: {
-          ondismiss: async () => {
-            setLoading(false);
-            setPaymentStatusNote('Payment window was closed before completion. Your room is temporarily held in pending status. Click "PAY NOW" to try again or select "Pay at Reception".');
-            try {
-              await api.recordPaymentFailure({
-                booking_id: orderData.booking_id,
-                razorpay_order_id: orderData.order_id,
-                error_description: 'Checkout modal dismissed by user before completion.'
-              });
-            } catch (ignore) {}
-          }
         }
-      });
+      }
     } catch (err: any) {
       setLoading(false);
       const msg = err.message || 'Unable to initialize online payment. Please try again or choose Pay at Reception.';
@@ -266,7 +217,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
       return;
     }
     if (!isPhoneValid && !isEmailValid) {
-      setError('Please enter a valid 10-digit mobile number and Gmail address ending with @gmail.com.');
+      setError('Please enter a valid 10-digit mobile number and email address.');
       return;
     }
     if (!isPhoneValid) {
@@ -274,7 +225,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
       return;
     }
     if (!isEmailValid) {
-      setError('Please enter a valid Gmail address ending with @gmail.com.');
+      setError('Please enter a valid email address.');
       return;
     }
     if (!agreedTerms) {
@@ -282,8 +233,8 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
       return;
     }
 
-    if (paymentMethod === 'online_razorpay') {
-      await handlePayWithRazorpay();
+    if (paymentMethod === 'online_phonepe') {
+      await handlePayOnline();
     } else {
       await handlePayAtHotel();
     }
@@ -357,7 +308,28 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
               </div>
             )}
 
-            {paymentStatusNote && !error && (
+            {checkoutUrl && (
+              <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xs space-y-2.5">
+                <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>PhonePe Payment Gateway Ready</span>
+                </div>
+                <p className="text-xs text-emerald-800">
+                  Click the button below to proceed directly to the secure PhonePe payment gateway:
+                </p>
+                <a
+                  href={checkoutUrl}
+                  target="_top"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center gap-2 w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white py-3 px-4 font-bold text-xs uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
+                >
+                  <Lock className="w-4 h-4 text-[#C5A059]" />
+                  <span>Open PhonePe Checkout &rarr;</span>
+                </a>
+              </div>
+            )}
+
+            {paymentStatusNote && !error && !checkoutUrl && (
               <div className="p-3.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
                 <div>{paymentStatusNote}</div>
@@ -367,7 +339,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
             {verifying && (
               <div className="p-4 bg-[#C5A059]/10 border border-[#C5A059] text-center space-y-2">
                 <RefreshCw className="w-6 h-6 text-[#C5A059] animate-spin mx-auto" />
-                <div className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">Verifying Razorpay Payment...</div>
+                <div className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">Verifying Payment Confirmation...</div>
                 <div className="text-[11px] text-[#666666]">Please do not refresh or close this window while we secure your booking.</div>
               </div>
             )}
@@ -430,12 +402,12 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-medium text-[#1A1A1A] mb-1">
-                    Email Address (Gmail) <span className="text-rose-600">*</span>
+                    Email Address <span className="text-rose-600">*</span>
                   </label>
                   <input
                     type="email"
                     required
-                    placeholder="guest@gmail.com"
+                    placeholder="guest@example.com"
                     value={guestEmail}
                     onChange={(e) => {
                       setGuestEmail(e.target.value);
@@ -454,11 +426,11 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                   {isEmailValid ? (
                     <p className="text-emerald-700 text-xs mt-1 font-medium flex items-center gap-1">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                      <span>✓ Valid Gmail address</span>
+                      <span>✓ Valid email address</span>
                     </p>
                   ) : (emailTouched || step === 2 || guestEmail.length > 0) ? (
                     <p className="text-rose-600 text-xs mt-1 font-medium">
-                      Please enter a valid Gmail address ending with @gmail.com.
+                      Please enter a valid email address (e.g. name@example.com).
                     </p>
                   ) : (
                     <p className="text-[11px] text-[#999999] mt-1">
@@ -483,7 +455,6 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                 <div className="pt-2">
                   <button
                     type="button"
-                    disabled={!guestName.trim() || !isPhoneValid || !isEmailValid}
                     onClick={() => {
                       setPhoneTouched(true);
                       setEmailTouched(true);
@@ -492,7 +463,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                         return;
                       }
                       if (!isPhoneValid && !isEmailValid) {
-                        setError('Please enter a valid 10-digit mobile number and Gmail address ending with @gmail.com.');
+                        setError('Please enter a valid 10-digit mobile number and email address.');
                         return;
                       }
                       if (!isPhoneValid) {
@@ -500,15 +471,15 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                         return;
                       }
                       if (!isEmailValid) {
-                        setError('Please enter a valid Gmail address ending with @gmail.com.');
+                        setError('Please enter a valid email address.');
                         return;
                       }
                       setError(null);
                       setStep(2);
                     }}
-                    className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white text-[11px] uppercase tracking-[0.2em] font-bold py-3.5 px-6 transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white text-[11px] uppercase tracking-[0.2em] font-bold py-3.5 px-6 transition-colors flex items-center justify-center gap-2 cursor-pointer shadow-md"
                   >
-                    <span>Proceed to Review & Payment</span>
+                    <span>Proceed to Checkout</span>
                     <ArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -620,51 +591,63 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                 </div>
 
                 {/* Price Breakdown */}
-                <div className="bg-[#FDFCFB] p-4 border border-stone-200 space-y-2 text-xs">
-                  <h4 className="font-bold text-[#C5A059] uppercase tracking-[0.2em] text-[10px] mb-2">Price Breakdown</h4>
-                  <div className="flex justify-between text-[#666666]">
-                    <span>
-                      Room Charges ({searchParams.rooms} Room × {selectedResult.nights} Night @ ₹{selectedResult.pricePerNight.toLocaleString('en-IN')})
-                    </span>
-                    <span className="font-medium text-[#1A1A1A]">₹{subtotalAmt.toLocaleString('en-IN')}</span>
-                  </div>
-
-                  {discountAmt > 0 && (
-                    <>
-                      <div className="flex justify-between text-emerald-700 font-medium">
-                        <span>Coupon Discount ({appliedCoupon?.code || 'Applied'})</span>
-                        <span className="font-bold">-₹{discountAmt.toLocaleString('en-IN')}</span>
+                {(() => {
+                  const isTaxInclusive = selectedResult.roomType.is_tax_inclusive || selectedResult.roomType.room_code === 'super-deluxe';
+                  return (
+                    <div className="bg-[#FDFCFB] p-4 border border-stone-200 space-y-2 text-xs">
+                      <h4 className="font-bold text-[#C5A059] uppercase tracking-[0.2em] text-[10px] mb-2">Price Breakdown</h4>
+                      <div className="flex justify-between text-[#666666]">
+                        <div>
+                          <span>
+                            Room Charges ({searchParams.rooms} Room × {selectedResult.nights} Night @ ₹{selectedResult.pricePerNight.toLocaleString('en-IN')})
+                          </span>
+                          {isTaxInclusive && (
+                            <span className="block text-[10px] text-[#C5A059] font-medium">
+                              (Tariff is inclusive of GST)
+                            </span>
+                          )}
+                        </div>
+                        <span className="font-medium text-[#1A1A1A]">₹{subtotalAmt.toLocaleString('en-IN')}</span>
                       </div>
-                      <div className="flex justify-between text-[#666666] pt-0.5 border-t border-dashed border-stone-200">
-                        <span>Taxable Amount</span>
-                        <span className="font-medium text-[#1A1A1A]">₹{taxableAmt.toLocaleString('en-IN')}</span>
-                      </div>
-                    </>
-                  )}
 
-                  <div className="flex justify-between text-[#666666]">
-                    <span>GST & Taxes (12%)</span>
-                    <span className="font-medium text-[#1A1A1A]">₹{taxAmt.toLocaleString('en-IN')}</span>
-                  </div>
-                  <div className="border-t border-stone-200 pt-2 flex justify-between text-sm font-serif font-bold text-[#1A1A1A]">
-                    <span>Total Amount Payable</span>
-                    <span className="text-[#C5A059] text-base font-bold">₹{finalTotalAmt.toLocaleString('en-IN')}</span>
-                  </div>
-                </div>
+                      {discountAmt > 0 && (
+                        <>
+                          <div className="flex justify-between text-emerald-700 font-medium">
+                            <span>Coupon Discount ({appliedCoupon?.code || 'Applied'})</span>
+                            <span className="font-bold">-₹{discountAmt.toLocaleString('en-IN')}</span>
+                          </div>
+                          <div className="flex justify-between text-[#666666] pt-0.5 border-t border-dashed border-stone-200">
+                            <span>Taxable Amount</span>
+                            <span className="font-medium text-[#1A1A1A]">₹{taxableAmt.toLocaleString('en-IN')}</span>
+                          </div>
+                        </>
+                      )}
+
+                      <div className="flex justify-between text-[#666666]">
+                        <span>GST & Taxes (12% {isTaxInclusive ? 'included in tariff' : ''})</span>
+                        <span className="font-medium text-[#1A1A1A]">₹{taxAmt.toLocaleString('en-IN')}</span>
+                      </div>
+                      <div className="border-t border-stone-200 pt-2 flex justify-between text-sm font-serif font-bold text-[#1A1A1A]">
+                        <span>Total Amount Payable</span>
+                        <span className="text-[#C5A059] text-base font-bold">₹{finalTotalAmt.toLocaleString('en-IN')}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {/* Payment Option Selection */}
                 <div className="space-y-2">
                   <div className="flex justify-between items-center">
                     <label className="block text-xs font-semibold text-[#1A1A1A]">Payment Option</label>
                     <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200">
-                      Razorpay Checkout Active
+                      PhonePe Secure Checkout Active
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label
-                      onClick={() => setPaymentMethod('online_razorpay')}
+                      onClick={() => setPaymentMethod('online_phonepe')}
                       className={`p-3.5 border cursor-pointer flex items-start gap-3 transition-all ${
-                        paymentMethod === 'online_razorpay'
+                        paymentMethod === 'online_phonepe'
                           ? 'bg-[#C5A059]/10 border-[#C5A059] text-[#1A1A1A] ring-1 ring-[#C5A059]'
                           : 'bg-white border-stone-200 text-[#666666] hover:border-stone-300'
                       }`}
@@ -672,8 +655,8 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                       <CreditCard className="w-5 h-5 text-[#C5A059] shrink-0 mt-0.5" />
                       <div>
                         <div className="text-xs font-semibold text-[#1A1A1A] flex items-center gap-1.5">
-                          <span>Pay Online (Razorpay)</span>
-                          {paymentMethod === 'online_razorpay' && (
+                          <span>Pay Online (PhonePe)</span>
+                          {paymentMethod === 'online_phonepe' && (
                             <Check className="w-3.5 h-3.5 text-[#C5A059]" />
                           )}
                         </div>
@@ -734,7 +717,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
 
                   <button
                     type="submit"
-                    disabled={loading || verifying || !agreedTerms || !isPhoneValid || !isEmailValid || !guestName.trim()}
+                    disabled={loading || verifying}
                     className="w-2/3 bg-[#1A1A1A] hover:bg-[#C5A059] text-white text-[11px] uppercase tracking-[0.15em] font-bold py-3.5 shadow-md transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {loading || verifying ? (
@@ -742,7 +725,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                         <RefreshCw className="w-4 h-4 animate-spin text-[#C5A059]" />
                         {verifying ? 'Verifying Signature...' : 'Opening Checkout...'}
                       </span>
-                    ) : paymentMethod === 'online_razorpay' ? (
+                    ) : paymentMethod === 'online_phonepe' ? (
                       <>
                         <Lock className="w-3.5 h-3.5 text-[#C5A059]" />
                         <span>PAY NOW (₹{finalTotalAmt.toLocaleString('en-IN')})</span>

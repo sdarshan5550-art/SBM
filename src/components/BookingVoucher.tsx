@@ -190,9 +190,7 @@ export const BookingVoucher: React.FC<BookingVoucherProps> = ({
                 <span className="text-[#666666] block text-[10px] uppercase tracking-wider">Payment Method:</span>
                 <span className="font-semibold text-[#1A1A1A] break-words">
                   {booking.payment_method?.startsWith('online_')
-                    ? `${(booking.gateway_provider || 'Online').toUpperCase()} Gateway Payment`
-                    : booking.payment_method === 'online_razorpay'
-                    ? 'Razorpay Standard Checkout (Online)'
+                    ? 'PhonePe Secure Online Payment'
                     : 'Pay at Reception'}
                 </span>
               </div>

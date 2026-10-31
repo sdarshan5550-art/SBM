@@ -72,6 +72,12 @@ export const defaultSocialMediaSettings: SocialMediaSettings = {
   }
 };
 
+export const CATEGORY_ORDER: Record<string, number> = {
+  'deluxe': 1,
+  'super-deluxe': 2,
+  'family': 3
+};
+
 interface DatabaseData {
   properties: Property[];
   room_types: RoomType[];
@@ -179,7 +185,7 @@ function getInitialData(): DatabaseData {
     }
   ];
 
-  // ONLY TWO ROOM CATEGORIES AS STRICTLY INSTRUCTED
+  // ROOM CATEGORIES IN STRICT ORDER: 1. Deluxe, 2. Super Deluxe, 3. Family Suite
   const roomTypes: RoomType[] = [
     {
       id: 'room-sbm-deluxe',
@@ -203,6 +209,32 @@ function getInitialData(): DatabaseData {
       tax_percent: 12,
       total_rooms: 10,
       images: ROOM_PHOTOS.sbmDeluxe,
+      status: 'active'
+    },
+    {
+      id: 'room-sbm-super-deluxe',
+      property_id: 'prop-sbm-hotel',
+      property_code: 'sbm-hotel',
+      room_code: 'super-deluxe',
+      name: 'Super Deluxe Room',
+      description: 'Comfortable double occupancy room with 1 King Size Bed, dedicated in-room tea amenities, and fresh bath essentials.',
+      capacity: 2,
+      bed_information: '1 King Size Bed',
+      amenities: [
+        'Tea Kit',
+        '2 Cups',
+        '2 Glasses',
+        'Electric Kettle',
+        '2 Bath Towels',
+        'Shampoo',
+        'Hand Soap',
+        'Moisturizer'
+      ],
+      price_per_night: 1999,
+      tax_percent: 12,
+      is_tax_inclusive: true,
+      total_rooms: 0,
+      images: [],
       status: 'active'
     },
     {
@@ -1066,10 +1098,49 @@ class DatabaseService {
         if (!parsed.sync_jobs) {
           parsed.sync_jobs = [];
         }
+        // Ensure super-deluxe room category exists in SBM Hotel
+        if (Array.isArray(parsed.room_types)) {
+          const hasSuperDeluxe = parsed.room_types.some(r => r.room_code === 'super-deluxe');
+          if (!hasSuperDeluxe) {
+            const deluxeIndex = parsed.room_types.findIndex(r => r.id === 'room-sbm-deluxe');
+            const superDeluxeRoom: RoomType = {
+              id: 'room-sbm-super-deluxe',
+              property_id: 'prop-sbm-hotel',
+              property_code: 'sbm-hotel',
+              room_code: 'super-deluxe',
+              name: 'Super Deluxe Room',
+              description: 'Comfortable double occupancy room with 1 King Size Bed, dedicated in-room tea amenities, and fresh bath essentials.',
+              capacity: 2,
+              bed_information: '1 King Size Bed',
+              amenities: [
+                'Tea Kit',
+                '2 Cups',
+                '2 Glasses',
+                'Electric Kettle',
+                '2 Bath Towels',
+                'Shampoo',
+                'Hand Soap',
+                'Moisturizer'
+              ],
+              price_per_night: 1999,
+              tax_percent: 12,
+              is_tax_inclusive: true,
+              total_rooms: 0,
+              images: [],
+              status: 'active'
+            };
+            if (deluxeIndex !== -1) {
+              parsed.room_types.splice(deluxeIndex + 1, 0, superDeluxeRoom);
+            } else {
+              parsed.room_types.push(superDeluxeRoom);
+            }
+          }
+        }
+
         if (Array.isArray(parsed.physical_rooms)) {
           for (const room of parsed.physical_rooms) {
             if (room.price === undefined) {
-              room.price = room.room_code === 'family' ? 3500 : 2500;
+              room.price = room.room_code === 'family' ? 3500 : (room.room_code === 'super-deluxe' ? 1999 : 2500);
             }
             if (!room.facilities) {
               room.facilities = ['Wi-Fi', 'Air Conditioning'];
@@ -1130,12 +1201,17 @@ class DatabaseService {
 
   // --- ROOM TYPES ---
   public getRoomTypes(propertyCode?: string): RoomType[] {
-    if (!propertyCode || propertyCode === 'both') {
-      return this.data.room_types;
+    let list = this.data.room_types || [];
+    if (propertyCode && propertyCode !== 'both') {
+      list = list.filter(
+        r => r.property_code === propertyCode || r.property_id === propertyCode
+      );
     }
-    return this.data.room_types.filter(
-      r => r.property_code === propertyCode || r.property_id === propertyCode
-    );
+    return [...list].sort((a, b) => {
+      const orderA = CATEGORY_ORDER[a.room_code] || 99;
+      const orderB = CATEGORY_ORDER[b.room_code] || 99;
+      return orderA - orderB;
+    });
   }
 
   public updateRoomType(id: string, updates: Partial<RoomType>): RoomType {
@@ -1284,9 +1360,21 @@ class DatabaseService {
       const isCapacityOk = room.capacity >= Math.ceil(totalGuests / (query.rooms || 1));
       const isAvailable = !isRestricted && availableCount >= (query.rooms || 1) && isCapacityOk;
 
-      const subtotal = room.price_per_night * nights * (query.rooms || 1);
-      const taxAmount = Math.round(subtotal * (this.data.settings.gst_percent / 100));
-      const totalAmount = subtotal + taxAmount;
+      let subtotal: number;
+      let taxAmount: number;
+      let totalAmount: number;
+
+      const gstRate = (room.tax_percent ?? this.data.settings.gst_percent ?? 12) / 100;
+      if (room.is_tax_inclusive || room.room_code === 'super-deluxe') {
+        // Tariff is inclusive of GST
+        totalAmount = room.price_per_night * nights * (query.rooms || 1);
+        taxAmount = Math.round(totalAmount - (totalAmount / (1 + gstRate)));
+        subtotal = totalAmount - taxAmount;
+      } else {
+        subtotal = room.price_per_night * nights * (query.rooms || 1);
+        taxAmount = Math.round(subtotal * gstRate);
+        totalAmount = subtotal + taxAmount;
+      }
 
       results.push({
         property,
@@ -1302,25 +1390,32 @@ class DatabaseService {
       });
     }
 
+    // Strictly maintain canonical order: 1. Deluxe, 2. Super Deluxe, 3. Family Suite
+    results.sort((a, b) => {
+      const orderA = CATEGORY_ORDER[a.roomType.room_code] || 99;
+      const orderB = CATEGORY_ORDER[b.roomType.room_code] || 99;
+      return orderA - orderB;
+    });
+
     return results;
   }
 
   // --- BOOKING OPERATIONS ---
   public createBooking(bookingData: Omit<Booking, 'id' | 'booking_number' | 'created_at' | 'updated_at'>): Booking {
-    // 0. Contact Number & Gmail Validation
-    const cleanPhone = (bookingData.guest_phone || '').trim();
+    // 0. Contact Number & Email Validation
+    const cleanPhone = (bookingData.guest_phone || '').trim().replace(/\D/g, '').replace(/^91/, '').replace(/^0/, '');
     const cleanEmail = (bookingData.guest_email || '').trim().toLowerCase();
 
     const isPhoneValid = /^[0-9]{10}$/.test(cleanPhone);
-    const isEmailValid = /^[a-z0-9._%+-]+@gmail\.com$/.test(cleanEmail);
+    const isEmailValid = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanEmail);
 
     if (!isPhoneValid || !isEmailValid) {
       if (!isPhoneValid && !isEmailValid) {
-        throw new Error('Please enter a valid 10-digit mobile number and Gmail address ending with @gmail.com.');
+        throw new Error('Please enter a valid 10-digit mobile number and email address.');
       } else if (!isPhoneValid) {
         throw new Error('Please enter a valid 10-digit mobile number.');
       } else {
-        throw new Error('Please enter a valid Gmail address ending with @gmail.com.');
+        throw new Error('Please enter a valid email address.');
       }
     }
 
@@ -1808,7 +1903,7 @@ if (updates.price !== undefined) {
     const newRoom: PhysicalRoom = {
       ...roomData,
       room_number: roomData.room_number.trim(),
-      price: roomData.price !== undefined ? Number(roomData.price) : (roomData.room_code === 'family' ? 3500 : 2500),
+      price: roomData.price !== undefined ? Number(roomData.price) : (roomData.room_code === 'family' ? 3500 : (roomData.room_code === 'super-deluxe' ? 1999 : 2500)),
       facilities: roomData.facilities || ['Wi-Fi', 'Air Conditioning'],
       id: `rm-${roomData.property_code}-${roomData.room_number.trim()}`,
       updated_at: new Date().toISOString()
@@ -1845,7 +1940,10 @@ if (updates.price !== undefined) {
       }
     } else {
       for (const rt of this.data.room_types) {
-        if (!rt.total_rooms || rt.total_rooms === 0) {
+        if (rt.room_code === 'super-deluxe') {
+          // Super Deluxe MUST NOT have dummy inventory
+          rt.total_rooms = 0;
+        } else if (!rt.total_rooms || rt.total_rooms === 0) {
           rt.total_rooms = rt.room_code === 'family' ? 5 : 10;
         }
       }

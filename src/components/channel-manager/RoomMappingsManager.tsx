@@ -305,7 +305,9 @@ export const RoomMappingsManager: React.FC<Props> = ({
                     value={formPmsRoomTypeId}
                     onChange={e => {
                       setFormPmsRoomTypeId(e.target.value);
-                      if (e.target.value.includes('family')) {
+                      if (e.target.value.includes('super-deluxe')) {
+                        setFormPmsRoomTypeName('Super Deluxe Room');
+                      } else if (e.target.value.includes('family')) {
                         setFormPmsRoomTypeName('Family Suite');
                       } else {
                         setFormPmsRoomTypeName('Deluxe Room');
@@ -314,6 +316,7 @@ export const RoomMappingsManager: React.FC<Props> = ({
                     className="w-full px-3 py-2 text-xs border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
                     <option value="room-sbm-deluxe">Deluxe Room (SBM Hotel)</option>
+                    <option value="room-sbm-super-deluxe">Super Deluxe Room (SBM Hotel)</option>
                     <option value="room-sbm-family">Family Suite (SBM Hotel)</option>
                     <option value="room-gh-deluxe">Deluxe Room (Guest House)</option>
                     <option value="room-gh-family">Family Suite (Guest House)</option>

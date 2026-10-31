@@ -7,6 +7,10 @@ export interface PropertyGatewayConfig {
   property_name: string;
   provider: PaymentGatewayProviderType;
   merchant_id: string;
+  client_id?: string;
+  client_secret?: string;
+  client_version?: number;
+  phonepe_env?: 'SANDBOX' | 'PRODUCTION';
   bank_account_name: string;
   settlement_account_number: string;
   is_configured: boolean;

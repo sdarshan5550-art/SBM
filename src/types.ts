@@ -1,6 +1,6 @@
 export type PropertyCode = 'sbm-hotel' | 'sbm-guest-house';
 
-export type RoomCategoryCode = 'deluxe' | 'family';
+export type RoomCategoryCode = 'deluxe' | 'super-deluxe' | 'family';
 
 export type RoomStatus = 'Available' | 'Reserved' | 'Occupied' | 'Maintenance' | 'Blocked';
 
@@ -10,7 +10,7 @@ export interface PhysicalRoom {
   property_name: string;
   room_type_id: string;
   room_code: RoomCategoryCode;
-  room_name: string; // 'Deluxe Room' | 'Family Suite'
+  room_name: string; // 'Deluxe Room' | 'Super Deluxe Room' | 'Family Suite'
   room_number: string; // e.g., '101', '102', '201'
   floor?: string;
   status: RoomStatus;
@@ -84,13 +84,14 @@ export interface RoomType {
   property_id: string;
   property_code: PropertyCode;
   room_code: RoomCategoryCode;
-  name: string; // 'Deluxe Room' | 'Family Suite'
+  name: string; // 'Deluxe Room' | 'Super Deluxe Room' | 'Family Suite'
   description: string;
   capacity: number;
   bed_information: string;
   amenities: string[];
   price_per_night: number;
   tax_percent: number;
+  is_tax_inclusive?: boolean;
   total_rooms: number;
   images: string[];
   status: 'active' | 'inactive';

@@ -242,17 +242,38 @@ async function startServer() {
   });
 
   // Lookup Booking
-  app.get('/api/bookings/lookup', (req, res) => {
+  app.get('/api/bookings/lookup', async (req, res) => {
     try {
       const bookingNumber = req.query.bookingNumber as string;
       const contact = req.query.contact as string;
       if (!bookingNumber) {
         return res.status(400).json({ error: 'Booking number is required.' });
       }
-      const booking = db.getBookingByIdOrNumber(bookingNumber, contact);
+      let booking = db.getBookingByIdOrNumber(bookingNumber, contact);
       if (!booking) {
         return res.status(404).json({ error: 'Booking not found with the provided details.' });
       }
+
+      // If booking is pending and has an active gateway order ID, check latest status from PhonePe
+      if (booking.payment_status === 'Pending' && booking.razorpay_order_id) {
+        try {
+          const verifyResult = await paymentGatewayRegistry.verifyPaymentForProperty(booking.property_code, {
+            order_id: booking.razorpay_order_id,
+            transaction_id: booking.razorpay_order_id,
+            property_code: booking.property_code
+          });
+          if (verifyResult.isValid) {
+            booking = db.updateBooking(booking.id, {
+              payment_status: 'Paid',
+              booking_status: 'Confirmed',
+              razorpay_payment_id: verifyResult.transaction_id
+            }) || booking;
+          }
+        } catch {
+          // Keep current booking record if gateway check is pending
+        }
+      }
+
       res.json(booking);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -321,34 +342,35 @@ async function startServer() {
 
       // Validate inputs
       if (!property_code || !check_in || !check_out || !guest_name || !guest_phone || !guest_email) {
-        return res.status(400).json({ error: 'All guest details and dates are required for booking.' });
+        return res.status(400).json({ error: 'All guest details and stay dates are required for booking.' });
       }
 
-      const cleanPhone = (guest_phone || '').trim();
+      const cleanPhone = (guest_phone || '').trim().replace(/\D/g, '').replace(/^91/, '').replace(/^0/, '');
       const cleanEmail = (guest_email || '').trim().toLowerCase();
       const isPhoneValid = /^[0-9]{10}$/.test(cleanPhone);
-      const isEmailValid = /^[a-z0-9._%+-]+@gmail\.com$/.test(cleanEmail);
+      const isEmailValid = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanEmail);
 
       if (!isPhoneValid || !isEmailValid) {
         if (!isPhoneValid && !isEmailValid) {
-          return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number and Gmail address ending with @gmail.com.' });
+          return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number and email address.' });
         } else if (!isPhoneValid) {
           return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number.' });
         } else {
-          return res.status(400).json({ error: 'Please enter a valid Gmail address ending with @gmail.com.' });
+          return res.status(400).json({ error: 'Please enter a valid email address.' });
         }
       }
 
-      // Check property from trusted server records
+      // Check property from trusted server records with code normalization
+      const normalizedPropertyCode = paymentGatewayRegistry.normalizePropertyCode(property_code);
       const properties = db.getProperties();
-      const property = properties.find(p => p.code === property_code);
+      const property = properties.find(p => p.code === normalizedPropertyCode || p.code === property_code || p.id === property_code);
       if (!property) {
         return res.status(400).json({ error: 'Invalid hotel property selected.' });
       }
 
       // Check room availability server-side
       const availResults = db.checkAvailability({
-        property_code,
+        property_code: property.code,
         check_in,
         check_out,
         adults: Number(adults),
@@ -393,10 +415,22 @@ async function startServer() {
         }
       }
 
-      const taxableAmount = Math.max(0, subtotal - discountAmount);
-      const gstPercent = db.getSettings().gst_percent || 12;
-      const taxAmount = Math.round(taxableAmount * (gstPercent / 100));
-      const totalAmount = taxableAmount + taxAmount;
+      let taxableAmount: number;
+      let taxAmount: number;
+      let totalAmount: number;
+
+      const gstPercent = matchedResult.roomType.tax_percent ?? db.getSettings().gst_percent ?? 12;
+      const isInclusive = matchedResult.roomType.is_tax_inclusive || matchedResult.roomType.room_code === 'super-deluxe';
+
+      if (isInclusive) {
+        totalAmount = Math.max(0, subtotal - discountAmount);
+        taxAmount = Math.round(totalAmount - (totalAmount / (1 + (gstPercent / 100))));
+        taxableAmount = totalAmount - taxAmount;
+      } else {
+        taxableAmount = Math.max(0, subtotal - discountAmount);
+        taxAmount = Math.round(taxableAmount * (gstPercent / 100));
+        totalAmount = taxableAmount + taxAmount;
+      }
       const amountInPaise = Math.round(totalAmount * 100);
 
       // Retrieve Property Payment Gateway Configuration
@@ -475,10 +509,15 @@ async function startServer() {
 
       let orderResult;
       try {
+        const host = req.get('host') || 'sbmhotel.com';
+        const protocol = req.protocol || 'https';
+        const dynamicReturnUrl = `${protocol}://${host}/manage-booking?booking_number=${booking.booking_number}`;
+
         orderResult = await paymentGatewayRegistry.createOrderForProperty(property.code, {
           amountInPaise,
           currency: 'INR',
           receipt: booking.booking_number,
+          returnUrl: dynamicReturnUrl,
           notes: {
             booking_id: booking.id,
             booking_number: booking.booking_number,
@@ -498,7 +537,7 @@ async function startServer() {
       } catch (orderErr: any) {
         console.error(`[Payment Order Exception for ${property.name}]`, orderErr.message);
         return res.status(502).json({
-          error: `Unable to initialize payment for ${property.name}. Please try again or choose Pay at Reception.`
+          error: orderErr.message || `Unable to initialize payment for ${property.name}. Please try again or choose Pay at Reception.`
         });
       }
 
@@ -578,13 +617,13 @@ async function startServer() {
         return res.status(400).json({ error: 'All guest details, dates, and booking items are required.' });
       }
 
-      const cleanPhone = (guest_phone || '').trim();
+      const cleanPhone = (guest_phone || '').trim().replace(/\D/g, '').replace(/^91/, '').replace(/^0/, '');
       const cleanEmail = (guest_email || '').trim().toLowerCase();
       const isPhoneValid = /^[0-9]{10}$/.test(cleanPhone);
-      const isEmailValid = /^[a-z0-9._%+-]+@gmail\.com$/.test(cleanEmail);
+      const isEmailValid = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(cleanEmail);
 
       if (!isPhoneValid || !isEmailValid) {
-        return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number and Gmail address ending with @gmail.com.' });
+        return res.status(400).json({ error: 'Please enter a valid 10-digit mobile number and email address.' });
       }
 
       // Group items by property_code to isolate amounts strictly per property
@@ -720,10 +759,15 @@ async function startServer() {
         });
 
         // Create Order Strictly Through This Property's Gateway
+        const host = req.get('host') || 'sbmhotel.com';
+        const protocol = req.protocol || 'https';
+        const dynamicReturnUrl = `${protocol}://${host}/manage-booking?booking_number=${childBooking.booking_number}`;
+
         const orderResult = await paymentGatewayRegistry.createOrderForProperty(property.code, {
           amountInPaise: propPaise,
           currency: 'INR',
           receipt: childBooking.booking_number,
+          returnUrl: dynamicReturnUrl,
           notes: {
             group_id: groupId,
             group_number: groupBookingNumber,
@@ -1542,8 +1586,8 @@ ${JSON.stringify(liveAvail, null, 2)}
               propertyCode: parsed.recommendedPropertyCode || 'sbm-hotel',
               propertyName: parsed.recommendedPropertyCode === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel',
               roomCode: parsed.recommendedRoomCode,
-              roomName: matchedRoom ? matchedRoom.name : (parsed.recommendedRoomCode === 'family' ? 'Family Suite' : 'Deluxe Room'),
-              pricePerNight: matchedRoom ? matchedRoom.price_per_night : (parsed.recommendedRoomCode === 'family' ? 3500 : 2500),
+              roomName: matchedRoom ? matchedRoom.name : (parsed.recommendedRoomCode === 'family' ? 'Family Suite' : (parsed.recommendedRoomCode === 'super-deluxe' ? 'Super Deluxe Room' : 'Deluxe Room')),
+              pricePerNight: matchedRoom ? matchedRoom.price_per_night : (parsed.recommendedRoomCode === 'family' ? 3500 : (parsed.recommendedRoomCode === 'super-deluxe' ? 1999 : 2500)),
               reason: parsed.recommendationReason || 'Ideal choice for your group size.'
             };
           }
@@ -1564,8 +1608,8 @@ ${JSON.stringify(liveAvail, null, 2)}
 
       if (msgLower.includes('temple') || msgLower.includes('distance') || msgLower.includes('far')) {
         replyText = 'SBM Hotel is situated on Main Temple Road, directly opposite Salasar Balaji Temple — just a 2-minute walk! SBM 2 Guest House is located nearby on Temple Approach Road, offering a peaceful environment.';
-      } else if (msgLower.includes('price') || msgLower.includes('cost') || msgLower.includes('rate') || msgLower.includes('deluxe') || msgLower.includes('family')) {
-        replyText = 'We offer strictly two room categories across our properties:\n\n• **Deluxe Room**: ₹2,500/night (+12% GST) — Max 2 adults\n• **Family Suite**: ₹3,500/night (+12% GST) — Max 4-5 adults\n\nAll rooms feature air conditioning, free Wi-Fi, 24/7 hot water, attached private bathroom, and TV.';
+      } else if (msgLower.includes('price') || msgLower.includes('cost') || msgLower.includes('rate') || msgLower.includes('deluxe') || msgLower.includes('super deluxe') || msgLower.includes('family')) {
+        replyText = 'We offer three room categories across our properties in Salasar:\n\n1. **Deluxe Room**: ₹2,500/night (+12% GST) — Max 2 adults\n2. **Super Deluxe Room**: ₹1,999/night (inclusive of GST) — Double Occupancy, 1 King Size Bed, in-room tea facilities & bathroom amenities\n3. **Family Suite**: ₹3,500/night (+12% GST) — Max 4-5 adults\n\nAll rooms feature air conditioning, free Wi-Fi, 24/7 hot water, attached private bathroom, and TV.';
       } else if (msgLower.includes('contact') || msgLower.includes('phone') || msgLower.includes('number') || msgLower.includes('email')) {
         replyText = 'You can reach us anytime:\n\n• **SBM Hotel**: +91 99835 67921, +91 98285 23333 (sbmhotel@gmail.com)\n• **SBM 2 Guest House**: +91 98285 00845, +91 98285 00855 (sbmguesthouse@gmail.com)';
       } else if (msgLower.includes('check-in') || msgLower.includes('check in') || msgLower.includes('check out') || msgLower.includes('time')) {
@@ -1587,7 +1631,7 @@ ${JSON.stringify(liveAvail, null, 2)}
           replyText = `I'm sorry, there are no rooms available for those selected dates (${searchCheckIn} to ${searchCheckOut}). Please try different dates or check our other property!`;
         }
       } else {
-        replyText = `Welcome to SBM Hotel & SBM 2 Guest House! I am SBM Concierge. How may I assist you with your stay in Salasar today? You can ask about our Deluxe Room (₹2,500/night), Family Suite (₹3,500/night), temple distance, or check room availability for your dates.`;
+        replyText = `Welcome to SBM Hotel & SBM 2 Guest House! I am SBM Concierge. How may I assist you with your stay in Salasar today? You can ask about our Deluxe Room (₹2,500/night), Super Deluxe Room (₹1,999/night inclusive of GST), Family Suite (₹3,500/night), temple distance, or check room availability for your dates.`;
       }
 
       res.json({

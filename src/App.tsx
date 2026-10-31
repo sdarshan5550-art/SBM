@@ -20,6 +20,9 @@ const getInitialTab = () => {
   if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) {
     return 'admin';
   }
+  if (path.includes('manage-booking') || window.location.search.includes('booking_number')) {
+    return 'manage-booking';
+  }
   return 'home';
 };
 
@@ -33,8 +36,8 @@ export default function App() {
       const path = window.location.pathname.toLowerCase();
       if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) {
         setCurrentTab('admin');
-      } else if (path === '/admin' || path === '/admin/' || path.endsWith('/admin')) {
-        setCurrentTab('home');
+      } else if (path.includes('manage-booking') || window.location.search.includes('booking_number')) {
+        setCurrentTab('manage-booking');
       }
     };
 

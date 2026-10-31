@@ -23,9 +23,22 @@ export function sanitizeEnv(val: string | undefined | null): string {
   return val.trim().replace(/^["']|["']$/g, '').trim();
 }
 
+function normalizeProvider(raw: string | undefined): PaymentGatewayProviderType {
+  if (!raw) return 'phonepe';
+  const lower = raw.toLowerCase().trim();
+  if (lower.includes('phonepe')) return 'phonepe';
+  if (lower.includes('razorpay')) return 'phonepe';
+  if (lower.includes('cashfree')) return 'cashfree';
+  if (lower.includes('stripe')) return 'stripe';
+  if (['phonepe', 'razorpay', 'cashfree', 'stripe'].includes(lower)) {
+    return lower === 'razorpay' ? 'phonepe' : (lower as PaymentGatewayProviderType);
+  }
+  return 'phonepe';
+}
+
 // Default Test Credentials for sandbox demonstration
-const SBM1_DEFAULT_KEY_ID = 'rzp_test_TRDGuSUIMqEArq';
-const SBM1_DEFAULT_KEY_SECRET = 'pTQbfu4fvI9VVAUPPx16ROLE';
+const SBM1_DEFAULT_KEY_ID = 'SU2610151733000347017432';
+const SBM1_DEFAULT_KEY_SECRET = 'b33f84d94d894e629dbf67b5e4c698d9';
 
 // SBM 2 has its own secondary test credentials / separate account representation
 const SBM2_DEFAULT_KEY_ID = 'rzp_test_SBM2GuestHouseKey';
@@ -53,30 +66,40 @@ export class PaymentGatewayRegistry {
     return adapter;
   }
 
+  public normalizePropertyCode(raw: string | undefined): PropertyCode {
+    const lower = (raw || '').toLowerCase().trim();
+    if (lower === 'sbm2' || lower === 'sbm-guest-house' || lower === 'prop-sbm-guesthouse' || lower.includes('guest')) {
+      return 'sbm-guest-house';
+    }
+    return 'sbm-hotel';
+  }
+
   /**
    * Retrieves server-side configuration for a property, merging:
    * 1. Environment variables (highest priority for secrets)
    * 2. Database persisted gateway configurations
-   * 3. Fallbacks to ensure backwards compatibility with existing RAZORPAY_* variables
+   * 3. Fallbacks to ensure backwards compatibility with existing variables
    */
-  public getPropertyConfig(propertyCode: PropertyCode): PropertyGatewayConfig {
-    const isSBM1 = propertyCode === 'sbm-hotel';
+  public getPropertyConfig(propertyCode: string): PropertyGatewayConfig {
+    const normalizedCode = this.normalizePropertyCode(propertyCode);
+    const isSBM1 = normalizedCode === 'sbm-hotel';
     const appUrl = sanitizeEnv(process.env.APP_URL) || 'https://sbmhotel.com';
 
     // Check DB for any admin-configured gateway settings
     const dbConfigs = db.getPropertyGatewayConfigs?.() || {};
-    const dbConfig = dbConfigs[propertyCode] || {};
+    const dbConfig = dbConfigs[normalizedCode] || {};
 
     if (isSBM1) {
       // SBM 1: SBM Hotel (Primary Property)
-      const provider: PaymentGatewayProviderType = (
+      const provider: PaymentGatewayProviderType = normalizeProvider(
         sanitizeEnv(process.env.SBM1_PAYMENT_GATEWAY_PROVIDER) ||
-        dbConfig.provider ||
-        'razorpay'
-      ) as PaymentGatewayProviderType;
+        dbConfig.provider
+      );
 
       let keyId =
         sanitizeEnv(process.env.SBM1_GATEWAY_KEY_ID) ||
+        sanitizeEnv(process.env.SBM1_PHONEPE_KEY_ID) ||
+        sanitizeEnv(process.env.SBM1_PHONEPE_CLIENT_ID) ||
         sanitizeEnv(process.env.SBM1_RAZORPAY_KEY_ID) ||
         dbConfig.key_id ||
         sanitizeEnv(process.env.RAZORPAY_KEY_ID) ||
@@ -84,6 +107,8 @@ export class PaymentGatewayRegistry {
 
       let keySecret =
         sanitizeEnv(process.env.SBM1_GATEWAY_KEY_SECRET) ||
+        sanitizeEnv(process.env.SBM1_PHONEPE_KEY_SECRET) ||
+        sanitizeEnv(process.env.SBM1_PHONEPE_CLIENT_SECRET) ||
         sanitizeEnv(process.env.SBM1_RAZORPAY_KEY_SECRET) ||
         dbConfig.key_secret ||
         sanitizeEnv(process.env.RAZORPAY_KEY_SECRET) ||
@@ -98,6 +123,7 @@ export class PaymentGatewayRegistry {
 
       const merchantId =
         sanitizeEnv(process.env.SBM1_MERCHANT_ID) ||
+        sanitizeEnv(process.env.SBM1_PHONEPE_MERCHANT_ID) ||
         dbConfig.merchant_id ||
         'SBM_HOTEL_1_MERCHANT';
 
@@ -111,11 +137,18 @@ export class PaymentGatewayRegistry {
         dbConfig.settlement_account_number ||
         '50200084920101';
 
+      const phonepeEnv = (
+        sanitizeEnv(process.env.SBM1_PHONEPE_ENV) ||
+        sanitizeEnv(process.env.PHONEPE_ENV) ||
+        dbConfig.phonepe_env ||
+        (keyId === SBM1_DEFAULT_KEY_ID ? 'SANDBOX' : (keyId.startsWith('SU') || merchantId.startsWith('M') ? 'PRODUCTION' : 'SANDBOX'))
+      ).toUpperCase() as 'SANDBOX' | 'PRODUCTION';
+
       const isConfigured = Boolean(keyId && keySecret);
       let mode: 'test' | 'live' | 'unconfigured' = 'unconfigured';
-      if (keyId.startsWith('rzp_test_') || keyId.startsWith('test_') || keyId.includes('sandbox')) {
+      if (keyId === SBM1_DEFAULT_KEY_ID || keyId.startsWith('rzp_test_') || keyId.startsWith('test_') || keyId.includes('sandbox')) {
         mode = 'test';
-      } else if (keyId.startsWith('rzp_live_') || keyId.startsWith('live_') || keyId.startsWith('pk_live_')) {
+      } else if (keyId.startsWith('rzp_live_') || keyId.startsWith('live_') || keyId.startsWith('pk_live_') || keyId.startsWith('SU') || merchantId.startsWith('M') || phonepeEnv === 'PRODUCTION') {
         mode = 'live';
       } else if (isConfigured) {
         mode = 'test';
@@ -136,6 +169,10 @@ export class PaymentGatewayRegistry {
         mode,
         key_id: keyId,
         key_secret: keySecret,
+        client_id: keyId,
+        client_secret: keySecret,
+        client_version: 1,
+        phonepe_env: (phonepeEnv === 'PRODUCTION' && keyId !== SBM1_DEFAULT_KEY_ID) ? 'PRODUCTION' : 'SANDBOX',
         webhook_secret: webhookSecret,
         webhook_url: `${appUrl}/api/payments/webhook/sbm-hotel`,
         masked_key_id: maskedKeyId,
@@ -144,24 +181,25 @@ export class PaymentGatewayRegistry {
       };
     } else {
       // SBM 2: SBM Guest House (Secondary Property)
-      const provider: PaymentGatewayProviderType = (
+      const provider: PaymentGatewayProviderType = normalizeProvider(
         sanitizeEnv(process.env.SBM2_PAYMENT_GATEWAY_PROVIDER) ||
-        dbConfig.provider ||
-        'razorpay'
-      ) as PaymentGatewayProviderType;
+        dbConfig.provider
+      );
 
       let keyId =
         sanitizeEnv(process.env.SBM2_GATEWAY_KEY_ID) ||
-        sanitizeEnv(process.env.SBM2_RAZORPAY_KEY_ID) ||
         sanitizeEnv(process.env.SBM2_PHONEPE_KEY_ID) ||
+        sanitizeEnv(process.env.SBM2_PHONEPE_CLIENT_ID) ||
+        sanitizeEnv(process.env.SBM2_RAZORPAY_KEY_ID) ||
         sanitizeEnv(process.env.SBM2_CASHFREE_KEY_ID) ||
         dbConfig.key_id ||
         SBM2_DEFAULT_KEY_ID;
 
       let keySecret =
         sanitizeEnv(process.env.SBM2_GATEWAY_KEY_SECRET) ||
-        sanitizeEnv(process.env.SBM2_RAZORPAY_KEY_SECRET) ||
         sanitizeEnv(process.env.SBM2_PHONEPE_KEY_SECRET) ||
+        sanitizeEnv(process.env.SBM2_PHONEPE_CLIENT_SECRET) ||
+        sanitizeEnv(process.env.SBM2_RAZORPAY_KEY_SECRET) ||
         sanitizeEnv(process.env.SBM2_CASHFREE_KEY_SECRET) ||
         dbConfig.key_secret ||
         SBM2_DEFAULT_KEY_SECRET;
@@ -174,6 +212,7 @@ export class PaymentGatewayRegistry {
 
       const merchantId =
         sanitizeEnv(process.env.SBM2_MERCHANT_ID) ||
+        sanitizeEnv(process.env.SBM2_PHONEPE_MERCHANT_ID) ||
         dbConfig.merchant_id ||
         'SBM_GUEST_HOUSE_2_MERCHANT';
 
@@ -187,11 +226,19 @@ export class PaymentGatewayRegistry {
         dbConfig.settlement_account_number ||
         '10480500938472';
 
+      const explicitPhonepeEnv = sanitizeEnv(process.env.SBM2_PHONEPE_ENV) || sanitizeEnv(process.env.PHONEPE_ENV);
+      const isProductionCredentials = keyId.startsWith('SU') || merchantId.startsWith('M');
+      const phonepeEnv: 'SANDBOX' | 'PRODUCTION' = (
+        explicitPhonepeEnv
+          ? explicitPhonepeEnv.toUpperCase()
+          : (dbConfig.phonepe_env ? dbConfig.phonepe_env.toUpperCase() : (isProductionCredentials ? 'PRODUCTION' : 'SANDBOX'))
+      ) as 'SANDBOX' | 'PRODUCTION';
+
       const isConfigured = Boolean(keyId && keySecret);
       let mode: 'test' | 'live' | 'unconfigured' = 'unconfigured';
-      if (keyId.startsWith('rzp_test_') || keyId.startsWith('test_') || keyId.includes('sandbox') || keyId.includes('Key')) {
+      if (keyId.startsWith('rzp_test_') || keyId.startsWith('test_') || keyId.includes('sandbox')) {
         mode = 'test';
-      } else if (keyId.startsWith('rzp_live_') || keyId.startsWith('live_') || keyId.startsWith('pk_live_')) {
+      } else if (keyId.startsWith('rzp_live_') || keyId.startsWith('live_') || keyId.startsWith('pk_live_') || isProductionCredentials || phonepeEnv === 'PRODUCTION') {
         mode = 'live';
       } else if (isConfigured) {
         mode = 'test';
@@ -212,6 +259,10 @@ export class PaymentGatewayRegistry {
         mode,
         key_id: keyId,
         key_secret: keySecret,
+        client_id: keyId,
+        client_secret: keySecret,
+        client_version: 1,
+        phonepe_env: (phonepeEnv === 'PRODUCTION' || mode === 'live') ? 'PRODUCTION' : 'SANDBOX',
         webhook_secret: webhookSecret,
         webhook_url: `${appUrl}/api/payments/webhook/sbm-guest-house`,
         masked_key_id: maskedKeyId,

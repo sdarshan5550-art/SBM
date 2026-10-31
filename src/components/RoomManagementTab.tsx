@@ -133,13 +133,21 @@ export const RoomManagementTab: React.FC = () => {
     blocked: rooms.filter(r => r.status === 'Blocked').length
   };
 
+  const CATEGORY_ORDER: Record<string, number> = {
+    'deluxe': 1,
+    'super-deluxe': 2,
+    'family': 3
+  };
+
   const openCreate = () => {
     setEditingRoom(null);
 
     const firstProperty = properties[0];
-    const firstRoomType = roomTypes.find(
-      r => r.property_code === firstProperty?.code
-    );
+    const availableTypes = roomTypes
+      .filter(r => r.property_code === (firstProperty?.code || 'sbm-hotel'))
+      .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99));
+
+    const firstRoomType = availableTypes[0];
 
     setForm({
       ...emptyRoom,
@@ -148,7 +156,10 @@ export const RoomManagementTab: React.FC = () => {
       room_type_id: firstRoomType?.id || '',
       room_code: firstRoomType?.room_code || 'deluxe',
       room_name: firstRoomType?.name || 'Deluxe Room',
-      facilities: ['Wi-Fi', 'Air Conditioning'],
+      price: firstRoomType?.price_per_night || 2500,
+      max_guests: firstRoomType?.capacity || 2,
+      bed_type: firstRoomType?.bed_information || '1 Double / King Bed',
+      facilities: firstRoomType?.amenities || ['Wi-Fi', 'Air Conditioning'],
     });
 
     setShowModal(true);
@@ -168,9 +179,11 @@ export const RoomManagementTab: React.FC = () => {
   const handlePropertyChange = (propertyCode: string) => {
     const property = properties.find(p => p.code === propertyCode);
 
-    const type = roomTypes.find(
-      r => r.property_code === propertyCode
-    );
+    const availableTypes = roomTypes
+      .filter(r => r.property_code === propertyCode)
+      .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99));
+
+    const type = availableTypes[0];
 
     setForm(prev => ({
       ...prev,
@@ -178,7 +191,10 @@ export const RoomManagementTab: React.FC = () => {
       property_name: property?.name || '',
       room_type_id: type?.id || '',
       room_code: type?.room_code || 'deluxe',
-      room_name: type?.name || 'Deluxe Room'
+      room_name: type?.name || 'Deluxe Room',
+      price: type?.price_per_night || (type?.room_code === 'super-deluxe' ? 1999 : 2500),
+      max_guests: type?.capacity || 2,
+      bed_type: type?.bed_information || '1 King Size Bed'
     }));
   };
 
@@ -191,7 +207,11 @@ export const RoomManagementTab: React.FC = () => {
       ...prev,
       room_type_id: type.id,
       room_code: type.room_code,
-      room_name: type.name
+      room_name: type.name,
+      price: type.price_per_night || (type.room_code === 'super-deluxe' ? 1999 : (type.room_code === 'family' ? 3500 : 2500)),
+      max_guests: type.capacity || (type.room_code === 'family' ? 4 : 2),
+      bed_type: type.bed_information || (type.room_code === 'super-deluxe' ? '1 King Size Bed' : '1 Double / King Bed'),
+      facilities: type.amenities && type.amenities.length > 0 ? type.amenities : prev.facilities
     }));
   };
   const toggleFacility = (facility: string) => {
@@ -224,6 +244,7 @@ export const RoomManagementTab: React.FC = () => {
     try {
       setSaving(true);
 
+      const defaultPrice = form.room_code === 'family' ? 3500 : (form.room_code === 'super-deluxe' ? 1999 : 2500);
       const payload = {
         property_code: form.property_code,
         property_name: form.property_name,
@@ -233,7 +254,7 @@ export const RoomManagementTab: React.FC = () => {
         room_number: form.room_number.trim(),
         floor: form.floor,
         status: form.status,
-        price: Number(form.price !== undefined ? form.price : (form.room_code === 'family' ? 3500 : 2500)),
+        price: Number(form.price !== undefined && !isNaN(Number(form.price)) ? form.price : defaultPrice),
         facilities: form.facilities || [],
         description: form.description || '',
         max_guests: Number(form.max_guests || 2),
@@ -690,12 +711,13 @@ export const RoomManagementTab: React.FC = () => {
                       .filter(r =>
                         r.property_code === form.property_code
                       )
+                      .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99))
                       .map(type => (
                         <option
                           key={type.id}
                           value={type.id}
                         >
-                          {type.name}
+                          {type.name} {type.is_tax_inclusive || type.room_code === 'super-deluxe' ? '(Tariff incl. GST)' : ''}
                         </option>
                       ))}
 

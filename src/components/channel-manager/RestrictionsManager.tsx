@@ -310,6 +310,7 @@ export const RestrictionsManager: React.FC<Props> = ({
                     className="w-full px-3 py-2 text-xs border border-stone-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:outline-none"
                   >
                     <option value="room-sbm-deluxe">Deluxe Room</option>
+                    <option value="room-sbm-super-deluxe">Super Deluxe Room</option>
                     <option value="room-sbm-family">Family Suite</option>
                     <option value="room-gh-deluxe">GH Deluxe Room</option>
                     <option value="room-gh-family">GH Family Suite</option>

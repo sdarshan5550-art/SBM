@@ -72,12 +72,19 @@ export const HomePage: React.FC<HomePageProps> = ({ onSelectRoomToBook, onNaviga
 
     // Canonical ordering: SBM 1 (sbm-hotel) followed by SBM Guest House (sbm-guest-house)
     const propertyOrder = ['sbm-hotel', 'sbm-guest-house'];
+    // Canonical category ordering: 1. Deluxe, 2. Super Deluxe, 3. Family Suite
+    const categoryOrder: Record<string, number> = { 'deluxe': 1, 'super-deluxe': 2, 'family': 3 };
 
     for (const code of propertyOrder) {
       const propertyRooms = searchResults.filter(
         (res) => res.property?.code === code || res.roomType?.property_code === code
       );
       if (propertyRooms.length > 0) {
+        propertyRooms.sort((a, b) => {
+          const orderA = categoryOrder[a.roomType.room_code] || 99;
+          const orderB = categoryOrder[b.roomType.room_code] || 99;
+          return orderA - orderB;
+        });
         const prop = propertyRooms[0].property;
         const displayName = code === 'sbm-hotel' ? 'SBM 1' : 'SBM Guest House';
         groups.push({

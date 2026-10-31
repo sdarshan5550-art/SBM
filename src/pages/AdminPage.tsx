@@ -1062,7 +1062,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                               {b.payment_status}
                             </span>
                             <div className="text-[10px] text-[#666666]">
-                              {b.payment_method === 'online_razorpay' ? 'Razorpay' : 'Pay at Hotel'}
+                              {b.payment_method?.startsWith('online_') ? 'PhonePe Online' : 'Pay at Hotel'}
                             </div>
                             {(b.razorpay_payment_id || b.payment_txn_id) && (
                               <div className="font-mono text-[9px] text-[#888888] truncate max-w-[110px]" title={b.razorpay_payment_id || b.payment_txn_id}>
@@ -1162,7 +1162,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                     <div className="grid grid-cols-2 gap-3 text-[11px]">
                       <div>
                         <span className="text-[#666666] block">Payment Mode:</span>
-                        <strong className="text-[#1A1A1A]">{selectedBooking.payment_method === 'online_razorpay' ? 'Razorpay Gateway (Online)' : 'Pay at Reception'}</strong>
+                        <strong className="text-[#1A1A1A]">{selectedBooking.payment_method?.startsWith('online_') ? 'PhonePe Gateway (Online)' : 'Pay at Reception'}</strong>
                       </div>
                       <div>
                         <span className="text-[#666666] block">Room Charges:</span>
@@ -1190,13 +1190,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                       </div>
                       {selectedBooking.razorpay_order_id && (
                         <div>
-                          <span className="text-[#666666] block">Razorpay Order ID:</span>
+                          <span className="text-[#666666] block">Gateway Order ID:</span>
                           <span className="font-mono text-[10px] text-[#1A1A1A] bg-stone-100 px-1.5 py-0.5 rounded">{selectedBooking.razorpay_order_id}</span>
                         </div>
                       )}
                       {(selectedBooking.razorpay_payment_id || selectedBooking.payment_txn_id) && (
                         <div>
-                          <span className="text-[#666666] block">Razorpay Payment ID:</span>
+                          <span className="text-[#666666] block">Gateway Transaction ID:</span>
                           <span className="font-mono text-[10px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded">{selectedBooking.razorpay_payment_id || selectedBooking.payment_txn_id}</span>
                         </div>
                       )}
@@ -1334,40 +1334,72 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
       {activeTab === 'inventory' && (
         <div className="space-y-6">
           <div className="bg-[#C5A059]/10 border border-[#C5A059]/30 p-4 text-xs text-[#1A1A1A]">
-            <strong>Strict Category Notice:</strong> The hotel inventory is restricted to two room categories: <strong>Deluxe Room (₹2,500/night)</strong> and <strong>Family Suite (₹3,500/night)</strong>.
+            <strong>Room Categories Notice:</strong> SBM Hotel inventory comprises three official categories: <strong>Deluxe Room</strong>, <strong>Super Deluxe Room</strong> (₹1,999/night default, inclusive of GST), and <strong>Family Suite</strong>. Tariff modifications saved here are persistently updated across customer listings and real-time reservation engines.
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {roomTypes.map((room) => (
-              <div key={room.id} className="bg-white border border-[#C5A059]/20 p-6 space-y-4 shadow-sm">
-                <div className="flex justify-between items-start border-b border-stone-100 pb-3">
-                  <div>
-                    <span className="text-[10px] uppercase font-bold text-[#C5A059] tracking-[0.2em]">{room.property_code === 'sbm-hotel' ? 'SBM Hotel' : 'SBM 2 Guest House'}</span>
-                    <h3 className="text-xl font-serif text-[#1A1A1A] font-medium">{room.name}</h3>
-                  </div>
-                  <button
-                    onClick={() => setEditingRoom(room)}
-                    className="p-2 border border-stone-200 hover:bg-[#1A1A1A] hover:text-white text-[#1A1A1A] transition-colors cursor-pointer"
-                  >
-                    <Edit3 className="w-4 h-4 text-[#C5A059]" />
-                  </button>
-                </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {[...roomTypes]
+              .sort((a, b) => {
+                const catOrder: Record<string, number> = { 'deluxe': 1, 'super-deluxe': 2, 'family': 3 };
+                const propOrder: Record<string, number> = { 'sbm-hotel': 1, 'sbm-guest-house': 2 };
+                const pDiff = (propOrder[a.property_code] || 9) - (propOrder[b.property_code] || 9);
+                if (pDiff !== 0) return pDiff;
+                return (catOrder[a.room_code] || 99) - (catOrder[b.room_code] || 99);
+              })
+              .map((room) => {
+                const isTaxInclusive = room.is_tax_inclusive || room.room_code === 'super-deluxe';
+                return (
+                  <div key={room.id} className="bg-white border border-[#C5A059]/20 p-6 space-y-4 shadow-sm flex flex-col justify-between">
+                    <div>
+                      <div className="flex justify-between items-start border-b border-stone-100 pb-3">
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-[#C5A059] tracking-[0.2em]">{room.property_code === 'sbm-hotel' ? 'SBM Hotel' : 'SBM 2 Guest House'}</span>
+                          <h3 className="text-xl font-serif text-[#1A1A1A] font-medium flex items-center gap-2">
+                            <span>{room.name}</span>
+                            {isTaxInclusive && (
+                              <span className="text-[9px] font-bold uppercase px-2 py-0.5 bg-[#C5A059]/20 text-[#8C6D23] border border-[#C5A059]/40">
+                                Incl. GST
+                              </span>
+                            )}
+                          </h3>
+                        </div>
+                        <button
+                          onClick={() => setEditingRoom(room)}
+                          className="p-2 border border-stone-200 hover:bg-[#1A1A1A] hover:text-white text-[#1A1A1A] transition-colors cursor-pointer"
+                          title="Edit tariff & room configuration"
+                        >
+                          <Edit3 className="w-4 h-4 text-[#C5A059]" />
+                        </button>
+                      </div>
 
-                <div className="grid grid-cols-2 gap-3 text-xs text-[#1A1A1A]">
-                  <div className="bg-[#FDFCFB] border border-stone-200 p-3">
-                    <span className="text-[10px] uppercase text-[#666666] block tracking-wider">Price Per Night</span>
-                    <span className="text-lg font-bold text-[#C5A059]">₹{room.price_per_night.toLocaleString('en-IN')}</span>
-                  </div>
+                      <div className="grid grid-cols-2 gap-3 text-xs text-[#1A1A1A] my-4">
+                        <div className="bg-[#FDFCFB] border border-stone-200 p-3">
+                          <span className="text-[10px] uppercase text-[#666666] block tracking-wider">Price Per Night</span>
+                          <span className="text-lg font-bold text-[#C5A059]">₹{room.price_per_night.toLocaleString('en-IN')}</span>
+                          <span className="text-[9px] text-[#888888] block">
+                            {isTaxInclusive ? '(incl. of GST)' : '+ 12% GST'}
+                          </span>
+                        </div>
 
-                  <div className="bg-[#FDFCFB] border border-stone-200 p-3">
-                    <span className="text-[10px] uppercase text-[#666666] block tracking-wider">Total Inventory</span>
-                    <span className="text-lg font-bold text-[#1A1A1A]">{room.total_rooms} Rooms</span>
-                  </div>
-                </div>
+                        <div className="bg-[#FDFCFB] border border-stone-200 p-3">
+                          <span className="text-[10px] uppercase text-[#666666] block tracking-wider">Total Inventory</span>
+                          <span className="text-lg font-bold text-[#1A1A1A]">{room.total_rooms} Rooms</span>
+                          <span className="text-[9px] text-[#888888] block">
+                            {room.total_rooms === 0 ? 'Add rooms via Tab 1' : 'Active capacity'}
+                          </span>
+                        </div>
+                      </div>
 
-                <p className="text-xs text-[#666666]">{room.description}</p>
-              </div>
-            ))}
+                      <p className="text-xs text-[#666666] line-clamp-3">{room.description}</p>
+                    </div>
+
+                    <div className="pt-3 border-t border-stone-100 flex justify-between items-center text-[11px] text-stone-500">
+                      <span>Capacity: {room.capacity} Guests</span>
+                      <span>{room.bed_information}</span>
+                    </div>
+                  </div>
+                );
+              })}
           </div>
 
           {/* Edit Room Modal */}

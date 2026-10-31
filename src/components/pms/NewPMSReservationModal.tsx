@@ -90,9 +90,19 @@ export const NewPMSReservationModal: React.FC<NewPMSReservationModalProps> = ({
     : Math.ceil(Math.abs(checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
 
   const pricePerNight = selectedRoomType ? selectedRoomType.price_per_night : 2500;
-  const subtotal = pricePerNight * nights * roomsCount;
-  const tax = Math.round(subtotal * 0.12);
-  const totalAmount = subtotal + tax;
+  const isInclusive = selectedRoomType?.is_tax_inclusive || selectedRoomType?.room_code === 'super-deluxe';
+  let subtotal = 0;
+  let tax = 0;
+  let totalAmount = 0;
+  if (isInclusive) {
+    totalAmount = pricePerNight * nights * roomsCount;
+    tax = Math.round(totalAmount - (totalAmount / 1.12));
+    subtotal = totalAmount - tax;
+  } else {
+    subtotal = pricePerNight * nights * roomsCount;
+    tax = Math.round(subtotal * 0.12);
+    totalAmount = subtotal + tax;
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -194,11 +204,15 @@ export const NewPMSReservationModal: React.FC<NewPMSReservationModalProps> = ({
                 onChange={(e) => setRoomTypeId(e.target.value)}
                 className="w-full bg-white border border-stone-300 p-2 font-medium"
               >
-                {roomTypes
+                {[...roomTypes]
                   .filter((r) => r.property_code === propertyCode)
+                  .sort((a, b) => {
+                    const orderMap: Record<string, number> = { 'deluxe': 1, 'super-deluxe': 2, 'family': 3 };
+                    return (orderMap[a.room_code] || 99) - (orderMap[b.room_code] || 99);
+                  })
                   .map((r) => (
                     <option key={r.id} value={r.id}>
-                      {r.name} (₹{r.price_per_night}/nt)
+                      {r.name} (₹{r.price_per_night}{r.is_tax_inclusive || r.room_code === 'super-deluxe' ? ' incl. GST' : '/nt'})
                     </option>
                   ))}
               </select>
