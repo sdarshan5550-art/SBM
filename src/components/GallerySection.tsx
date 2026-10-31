@@ -37,8 +37,11 @@ export const GallerySection: React.FC = () => {
                       img.category === 'rooms-interiors' ||
                       img.category === 'rooms' ||
                       img.roomId === 'deluxe' ||
+                      img.roomId === 'super-deluxe' ||
                       img.roomId === 'family' ||
                       img.category === 'Deluxe Room' ||
+                      img.category === 'Super Deluxe Room' ||
+                      img.category === 'Super Deluxe' ||
                       img.category === 'Family Suite' ||
                       (img.category && img.category.includes('Room')) ||
                       (img.category && img.category.includes('Suite'));

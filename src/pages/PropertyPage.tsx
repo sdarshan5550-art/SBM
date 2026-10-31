@@ -27,7 +27,11 @@ export const PropertyPage: React.FC<PropertyPageProps> = ({ initialCode, onOpenB
 
   useEffect(() => {
     if (selectedPropertyCode) {
-      api.getRoomTypes(selectedPropertyCode).then(setRoomTypes).catch(console.error);
+      api.getRoomTypes(selectedPropertyCode).then(types => {
+        const catOrder: Record<string, number> = { 'deluxe': 1, 'super-deluxe': 2, 'family': 3 };
+        const sorted = [...types].sort((a, b) => (catOrder[a.room_code] || 99) - (catOrder[b.room_code] || 99));
+        setRoomTypes(sorted);
+      }).catch(console.error);
     }
   }, [selectedPropertyCode]);
 

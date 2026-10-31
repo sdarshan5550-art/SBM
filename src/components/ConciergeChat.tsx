@@ -267,7 +267,7 @@ export const ConciergeChat: React.FC<ConciergeChatProps> = ({ onSelectBookingRoo
                               </div>
 
                               <div className="flex items-center justify-between text-[10px] text-stone-600">
-                                <span>{item.isAvailable ? `Available (${item.availableRooms} rooms left)` : 'Fully Booked'}</span>
+                                <span>{item.isAvailable ? `Available (${item.availableRooms} rooms left)` : ((!item.totalRooms || item.totalRooms === 0) ? 'Currently Not Available' : 'Sold Out')}</span>
                                 {item.isAvailable && (
                                   <button
                                     onClick={() =>

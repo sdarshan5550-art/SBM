@@ -489,7 +489,7 @@ export const RoomManagementTab: React.FC = () => {
 
                     <td className="p-4">
                       <span className="font-serif font-bold text-sm text-[#C5A059]">
-                        ₹{(room.price ?? (room.room_code === 'family' ? 3500 : 2500)).toLocaleString('en-IN')}
+                        ₹{(room.price ?? (room.room_code === 'super-deluxe' ? 1999 : (room.room_code === 'family' ? 3500 : 2500))).toLocaleString('en-IN')}
                       </span>
                     </td>
 
@@ -789,7 +789,7 @@ export const RoomManagementTab: React.FC = () => {
                     min="0"
                     step="1"
                     required
-                    value={form.price ?? (form.room_code === 'family' ? 3500 : 2500)}
+                    value={form.price ?? (form.room_code === 'super-deluxe' ? 1999 : (form.room_code === 'family' ? 3500 : 2500))}
                     onChange={e =>
                       setForm({
                         ...form,

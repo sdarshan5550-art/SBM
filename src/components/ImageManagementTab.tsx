@@ -21,7 +21,8 @@ import {
   Layers,
   Sparkles,
   Edit3,
-  Building2
+  Building2,
+  BedDouble
 } from 'lucide-react';
 import { api, getAdminToken } from '../lib/api';
 import { ManagedImage, GalleryCategory, AboutPageImage } from '../types';
@@ -50,7 +51,7 @@ export const ImageManagementTab: React.FC = () => {
 
   // Active navigation view inside Image Management: Rooms, Gallery, Rooms & Interiors, Property Cover Images, or About Page
   const [mainView, setMainView] = useState<'rooms' | 'gallery' | 'interiors' | 'property-covers' | 'about-page'>('interiors');
-  const [selectedRoomForGallery, setSelectedRoomForGallery] = useState<'deluxe' | 'family' | null>(null);
+  const [selectedRoomForGallery, setSelectedRoomForGallery] = useState<'deluxe' | 'super-deluxe' | 'family' | null>(null);
   const [galleryCategoryFilter, setGalleryCategoryFilter] = useState<string>('all');
 
   // Interior Images Filter state
@@ -67,7 +68,7 @@ export const ImageManagementTab: React.FC = () => {
 
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [uploadTargetRoom, setUploadTargetRoom] = useState<'deluxe' | 'family' | 'none'>('none');
+  const [uploadTargetRoom, setUploadTargetRoom] = useState<'deluxe' | 'super-deluxe' | 'family' | 'none'>('none');
   const [uploadTargetProperty, setUploadTargetProperty] = useState<string>('sbm-hotel');
   const [uploadTargetCategory, setUploadTargetCategory] = useState<string>('Hotel Exterior');
   const [uploadIsPrimary, setUploadIsPrimary] = useState(false);
@@ -200,15 +201,19 @@ export const ImageManagementTab: React.FC = () => {
     }
   };
 
-  // 1. Room Images
+  // 1. Room Images (Deluxe, Super Deluxe, Family Suite)
   const deluxeImages = (images || []).filter(
     img => img.roomId === 'deluxe' || img.category === 'Deluxe Room'
+  );
+  const superDeluxeImages = (images || []).filter(
+    img => img.roomId === 'super-deluxe' || img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe'
   );
   const familyImages = (images || []).filter(
     img => img.roomId === 'family' || img.category === 'Family Suite'
   );
 
   const deluxePrimary = deluxeImages.find(img => img.isPrimaryCover || img.isMainForRoom) || deluxeImages[0];
+  const superDeluxePrimary = superDeluxeImages.find(img => img.isPrimaryCover || img.isMainForRoom) || superDeluxeImages[0];
   const familyPrimary = familyImages.find(img => img.isPrimaryCover || img.isMainForRoom) || familyImages[0];
 
   // 2. Property Cover Images (Dedicated for Our Properties cards on public site)
@@ -239,8 +244,11 @@ export const ImageManagementTab: React.FC = () => {
   // 3. Hotel Gallery Images (General property amenities, excluding room categories and dedicated property covers)
   const hotelGalleryImages = (images || []).filter(
     img => img.roomId !== 'deluxe' &&
+           img.roomId !== 'super-deluxe' &&
            img.roomId !== 'family' &&
            img.category !== 'Deluxe Room' &&
+           img.category !== 'Super Deluxe Room' &&
+           img.category !== 'Super Deluxe' &&
            img.category !== 'Family Suite' &&
            img.category !== 'Property Cover'
   );
@@ -255,8 +263,11 @@ export const ImageManagementTab: React.FC = () => {
            img.category === 'rooms-interiors' ||
            img.category === 'rooms' ||
            img.roomId === 'deluxe' ||
+           img.roomId === 'super-deluxe' ||
            img.roomId === 'family' ||
            img.category === 'Deluxe Room' ||
+           img.category === 'Super Deluxe Room' ||
+           img.category === 'Super Deluxe' ||
            img.category === 'Family Suite'
   );
 
@@ -361,6 +372,9 @@ export const ImageManagementTab: React.FC = () => {
       if (uploadTargetRoom === 'deluxe') {
         targetCat = 'Deluxe Room';
         targetRoom = 'deluxe';
+      } else if (uploadTargetRoom === 'super-deluxe') {
+        targetCat = 'Super Deluxe Room';
+        targetRoom = 'super-deluxe';
       } else if (uploadTargetRoom === 'family') {
         targetCat = 'Family Suite';
         targetRoom = 'family';
@@ -518,10 +532,12 @@ export const ImageManagementTab: React.FC = () => {
     }
   };
 
-  const openUploadForRoom = (roomCode: 'deluxe' | 'family', isPrimary: boolean = false) => {
+  const openUploadForRoom = (roomCode: 'deluxe' | 'super-deluxe' | 'family', isPrimary: boolean = false) => {
     setUploadTargetRoom(roomCode);
     setUploadIsPrimary(isPrimary);
-    setUploadTargetCategory(roomCode === 'deluxe' ? 'Deluxe Room' : 'Family Suite');
+    const cat = roomCode === 'deluxe' ? 'Deluxe Room' : (roomCode === 'super-deluxe' ? 'Super Deluxe Room' : 'Family Suite');
+    setUploadTargetCategory(cat);
+    setUploadTargetProperty('sbm-hotel');
     setIsUploadModalOpen(true);
   };
 
@@ -653,7 +669,7 @@ export const ImageManagementTab: React.FC = () => {
           }`}
         >
           <Layers className="w-4 h-4 text-[#C5A059]" />
-          ROOM IMAGES ({deluxeImages.length + familyImages.length})
+          ROOM IMAGES ({deluxeImages.length + superDeluxeImages.length + familyImages.length})
         </button>
 
         <button
@@ -755,8 +771,8 @@ export const ImageManagementTab: React.FC = () => {
       {/* MAIN VIEW 1: ROOM IMAGES */}
       {!loading && !error && mainView === 'rooms' && !selectedRoomForGallery && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Deluxe Room Card */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* 1. Deluxe Room Card */}
             <div id="card-deluxe-room-images" className="bg-white border border-[#C5A059]/20 shadow-sm p-6 space-y-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -854,7 +870,108 @@ export const ImageManagementTab: React.FC = () => {
               </div>
             </div>
 
-            {/* Family Suite Card */}
+            {/* 2. Super Deluxe Room Card (Category 2) */}
+            <div id="card-super-deluxe-room-images" className="bg-white border-2 border-[#C5A059]/40 shadow-sm p-6 space-y-4 flex flex-col justify-between relative">
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-[#C5A059]" />
+                    <h3 className="text-lg font-serif font-semibold text-[#1A1A1A]">Super Deluxe Room</h3>
+                  </div>
+                  <span className="text-[11px] font-semibold bg-[#C5A059]/15 text-[#8C6D23] px-2.5 py-0.5 border border-[#C5A059]/30">
+                    Gallery: {superDeluxeImages.length} {superDeluxeImages.length === 1 ? 'image' : 'images'}
+                  </span>
+                </div>
+                <p className="text-xs text-stone-500 mb-4">
+                  Double Occupancy with 1 King Size Bed, In-Room Tea and Bathroom Amenities (₹1,999/night inclusive of GST).
+                </p>
+
+                {/* Primary Cover Image Preview */}
+                <div className="relative h-60 bg-gradient-to-br from-[#1C1C1C] via-[#242424] to-[#141414] border border-[#C5A059]/30 overflow-hidden group">
+                  {superDeluxePrimary ? (
+                    <>
+                      <ManagedImageDisplay
+                        src={superDeluxePrimary.imageUrl}
+                        alt={superDeluxePrimary.title || 'Super Deluxe Room Cover'}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        fallbackType="super-deluxe"
+                        isAdmin={true}
+                        onReplaceClick={() => openReplaceModal(superDeluxePrimary)}
+                      />
+                      <div className="absolute top-3 left-3 bg-[#1A1A1A]/85 text-[#C5A059] border border-[#C5A059]/40 text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 backdrop-blur-sm flex items-center gap-1.5 shadow-sm">
+                        <Star className="w-3 h-3 fill-[#C5A059]" />
+                        Primary Cover
+                      </div>
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent p-3 text-white pointer-events-none">
+                        <p className="text-xs font-semibold">{superDeluxePrimary.title || 'Super Deluxe Room'}</p>
+                        {superDeluxePrimary.description && (
+                          <p className="text-[11px] text-stone-300 line-clamp-1">{superDeluxePrimary.description}</p>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-center p-4">
+                      <div className="w-10 h-10 rounded-full bg-[#C5A059]/20 border border-[#C5A059]/40 flex items-center justify-center text-[#C5A059] mb-2">
+                        <BedDouble className="w-5 h-5" />
+                      </div>
+                      <p className="text-xs text-white font-medium">No images uploaded for Super Deluxe</p>
+                      <p className="text-[10px] text-stone-400 mt-1">Upload photographs to display in public room cards</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Mini thumbnails preview */}
+                {superDeluxeImages.length > 1 && (
+                  <div className="flex items-center gap-2 mt-3 overflow-x-auto pb-1">
+                    {superDeluxeImages.map((img, idx) => (
+                      <button
+                        key={img.id}
+                        onClick={() => openReplaceModal(img)}
+                        className={`relative w-14 h-12 shrink-0 border overflow-hidden cursor-pointer transition-all ${
+                          img.id === superDeluxePrimary?.id ? 'border-[#C5A059] ring-2 ring-[#C5A059]/30' : 'border-stone-200 opacity-70 hover:opacity-100'
+                        }`}
+                        title={img.title || `Photo ${idx + 1}`}
+                      >
+                        <ManagedImageDisplay
+                          src={img.imageUrl}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          fallbackType="super-deluxe"
+                          isAdmin={true}
+                        />
+                        {img.id === superDeluxePrimary?.id && (
+                          <div className="absolute bottom-0 inset-x-0 bg-[#C5A059] text-[8px] font-bold text-white text-center py-0.2">
+                            PRIMARY
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="pt-4 border-t border-stone-100 flex items-center gap-2">
+                <button
+                  id="change-super-deluxe-cover-btn"
+                  onClick={() => openUploadForRoom('super-deluxe', true)}
+                  className="flex-1 py-2 text-xs font-medium border border-stone-300 hover:border-[#C5A059] bg-white hover:bg-stone-50 text-stone-800 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5 text-[#C5A059]" />
+                  Change Cover
+                </button>
+                <button
+                  id="manage-super-deluxe-gallery-btn"
+                  onClick={() => setSelectedRoomForGallery('super-deluxe')}
+                  className="flex-1 py-2 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#C5A059] text-white transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-sm"
+                >
+                  <FolderOpen className="w-3.5 h-3.5" />
+                  Manage Gallery ({superDeluxeImages.length})
+                </button>
+              </div>
+            </div>
+
+            {/* 3. Family Suite Card */}
             <div id="card-family-suite-images" className="bg-white border border-[#C5A059]/20 shadow-sm p-6 space-y-4 flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-2">
@@ -971,9 +1088,11 @@ export const ImageManagementTab: React.FC = () => {
               </button>
               <div>
                 <h3 className="text-base font-serif font-semibold text-[#1A1A1A] flex items-center gap-2">
-                  {selectedRoomForGallery === 'deluxe' ? 'Deluxe Room Gallery' : 'Family Suite Gallery'}
+                  {selectedRoomForGallery === 'deluxe'
+                    ? 'Deluxe Room Gallery'
+                    : (selectedRoomForGallery === 'super-deluxe' ? 'Super Deluxe Room Gallery' : 'Family Suite Gallery')}
                   <span className="text-xs font-normal text-stone-500 font-sans">
-                    ({(selectedRoomForGallery === 'deluxe' ? deluxeImages : familyImages).length} photos)
+                    ({(selectedRoomForGallery === 'deluxe' ? deluxeImages : (selectedRoomForGallery === 'super-deluxe' ? superDeluxeImages : familyImages)).length} photos)
                   </span>
                 </h3>
                 <p className="text-[11px] text-stone-500">
@@ -988,13 +1107,15 @@ export const ImageManagementTab: React.FC = () => {
               className="px-3.5 py-2 text-xs font-semibold bg-[#1A1A1A] hover:bg-[#C5A059] text-white transition-all flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
             >
               <Plus className="w-3.5 h-3.5" />
-              Upload Photo for {selectedRoomForGallery === 'deluxe' ? 'Deluxe Room' : 'Family Suite'}
+              Upload Photo for {selectedRoomForGallery === 'deluxe' ? 'Deluxe Room' : (selectedRoomForGallery === 'super-deluxe' ? 'Super Deluxe Room' : 'Family Suite')}
             </button>
           </div>
 
           {/* Room Gallery Grid */}
           {(() => {
-            const currentList = selectedRoomForGallery === 'deluxe' ? deluxeImages : familyImages;
+            const currentList = selectedRoomForGallery === 'deluxe'
+              ? deluxeImages
+              : (selectedRoomForGallery === 'super-deluxe' ? superDeluxeImages : familyImages);
             if (currentList.length === 0) {
               return (
                 <div className="bg-white border border-stone-200 p-12 text-center space-y-3">
@@ -1030,7 +1151,7 @@ export const ImageManagementTab: React.FC = () => {
                           src={img.imageUrl}
                           alt={img.title || 'Room photo'}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          fallbackType={selectedRoomForGallery === 'family' ? 'family' : 'deluxe'}
+                          fallbackType={selectedRoomForGallery === 'family' ? 'family' : (selectedRoomForGallery === 'super-deluxe' ? 'super-deluxe' : 'deluxe')}
                           isAdmin={true}
                           onReplaceClick={() => openReplaceModal(img)}
                         />
@@ -2376,6 +2497,10 @@ export const ImageManagementTab: React.FC = () => {
                       setUploadTargetRoom('deluxe');
                       setUploadTargetCategory('Deluxe Room');
                       setUploadTargetProperty('sbm-hotel');
+                    } else if (val === 'super-deluxe') {
+                      setUploadTargetRoom('super-deluxe');
+                      setUploadTargetCategory('Super Deluxe Room');
+                      setUploadTargetProperty('sbm-hotel');
                     } else if (val === 'family') {
                       setUploadTargetRoom('family');
                       setUploadTargetCategory('Family Suite');
@@ -2409,6 +2534,7 @@ export const ImageManagementTab: React.FC = () => {
                   </optgroup>
                   <optgroup label="Room Categories (Public Website)">
                     <option value="deluxe">Room: Deluxe Room (Public Category)</option>
+                    <option value="super-deluxe">Room: Super Deluxe Room (Public Category)</option>
                     <option value="family">Room: Family Suite (Public Category)</option>
                   </optgroup>
                   <optgroup label="Property Cover Images (Our Properties on Homepage)">

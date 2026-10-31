@@ -18,11 +18,34 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
   const isSuperDeluxe = room.room_code === 'super-deluxe' || room.id === 'room-sbm-super-deluxe';
   const isTaxInclusive = room.is_tax_inclusive || isSuperDeluxe;
 
-  // Strict constraint: Do not add photographs or placeholder images for Super Deluxe, do not reuse photos from Deluxe or Family Suite
-  const hasPhotos = !isSuperDeluxe && room.images && room.images.length > 0;
-  const images = hasPhotos
-    ? room.images
-    : (room.room_code === 'family' ? [DEFAULT_PHOTOS.familySuite] : [DEFAULT_PHOTOS.deluxeRoom]);
+  // Availability status helpers for guest-facing presentation (free of admin jargon)
+  const getUnavailableBadge = (): string => {
+    if (room.total_rooms === 0 || (availabilityResult && availabilityResult.totalRooms === 0)) {
+      return 'Currently Not Available';
+    }
+    if (availabilityResult && (availabilityResult.availableRooms === undefined || availabilityResult.availableRooms === null)) {
+      return 'Availability Currently Unavailable';
+    }
+    return 'Sold Out';
+  };
+
+  const getUnavailableButton = (): string => {
+    if (room.total_rooms === 0 || (availabilityResult && availabilityResult.totalRooms === 0)) {
+      return 'CURRENTLY NOT AVAILABLE';
+    }
+    if (availabilityResult && (availabilityResult.availableRooms === undefined || availabilityResult.availableRooms === null)) {
+      return 'AVAILABILITY CURRENTLY UNAVAILABLE';
+    }
+    return 'SOLD OUT';
+  };
+
+  // If admin has uploaded photos for Super Deluxe, display them in the carousel.
+  // Otherwise, fall back to the elegant image-free presentation without reusing Deluxe/Family photos.
+  const hasUploadedPhotos = Boolean(room.images && room.images.length > 0);
+  const showPhotoCarousel = !isSuperDeluxe || hasUploadedPhotos;
+  const images = hasUploadedPhotos
+    ? room.images!
+    : (room.room_code === 'family' ? [DEFAULT_PHOTOS.familySuite] : (isSuperDeluxe ? [] : [DEFAULT_PHOTOS.deluxeRoom]));
 
   const handlePrevImage = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -37,13 +60,13 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
   return (
     <div className="bg-white border border-[#C5A059]/20 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col md:flex-row group">
       {/* Left Area: Photo Carousel or Elegant Image-Free Presentation for Super Deluxe */}
-      {!isSuperDeluxe && hasPhotos ? (
+      {showPhotoCarousel && images.length > 0 ? (
         <div className="md:w-5/12 relative h-64 md:h-auto overflow-hidden bg-stone-100 shrink-0">
           <ManagedImageDisplay
             src={images[currentImgIndex] || images[0]}
             alt={`${room.name} view ${currentImgIndex + 1}`}
             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-            fallbackType={room.room_code === 'deluxe' ? 'deluxe' : 'family'}
+            fallbackType={room.room_code === 'deluxe' ? 'deluxe' : (room.room_code === 'super-deluxe' ? 'super-deluxe' : 'family')}
           />
 
           {/* Image Controls if multiple photos */}
@@ -93,9 +116,9 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
                 {availableCount} Room{availableCount > 1 ? 's' : ''} Available
               </span>
             ) : (
-              <span className="bg-rose-900/90 text-white text-[10px] font-semibold uppercase tracking-widest px-3 py-1 shadow-sm backdrop-blur-sm flex items-center gap-1.5">
-                <AlertTriangle className="w-3 h-3 text-rose-300" />
-                Sold Out
+              <span className="bg-stone-900/90 text-stone-200 border border-stone-700 text-[10px] font-semibold uppercase tracking-widest px-3 py-1 shadow-sm backdrop-blur-sm flex items-center gap-1.5">
+                <AlertTriangle className="w-3 h-3 text-[#C5A059]" />
+                {getUnavailableBadge()}
               </span>
             )}
           </div>
@@ -120,7 +143,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
             ) : (
               <span className="bg-stone-900/90 text-stone-300 border border-stone-700 text-[10px] font-semibold uppercase tracking-widest px-3 py-1 shadow-sm flex items-center gap-1.5 w-fit">
                 <AlertTriangle className="w-3 h-3 text-[#C5A059]" />
-                {room.total_rooms === 0 ? 'Admin Setup Pending' : 'Sold Out for Dates'}
+                {getUnavailableBadge()}
               </span>
             )}
           </div>
@@ -285,7 +308,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
           >
             {isAvailable
               ? 'SELECT THIS ROOM'
-              : (room.total_rooms === 0 ? 'AVAILABLE ONCE ROOMS ARE ADDED BY ADMIN' : 'SOLD OUT FOR SELECTED DATES')}
+              : getUnavailableButton()}
           </button>
         </div>
       </div>

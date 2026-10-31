@@ -600,8 +600,8 @@ export interface ManagedImage {
   imageUrl: string;
   title?: string;
   description?: string;
-  category: GalleryCategory | 'Deluxe Room' | 'Family Suite' | string;
-  roomId?: 'deluxe' | 'family' | string;
+  category: GalleryCategory | 'Deluxe Room' | 'Super Deluxe Room' | 'Family Suite' | string;
+  roomId?: 'deluxe' | 'super-deluxe' | 'family' | string;
   propertyId?: string;
   displayOrder: number;
   isPrimaryCover?: boolean;

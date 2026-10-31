@@ -6,7 +6,7 @@ interface ManagedImageDisplayProps {
   src?: string;
   alt?: string;
   className?: string;
-  fallbackType?: 'deluxe' | 'family' | 'hotel' | 'guest-house' | 'general';
+  fallbackType?: 'deluxe' | 'super-deluxe' | 'family' | 'hotel' | 'guest-house' | 'general';
   isAdmin?: boolean;
   onReplaceClick?: () => void;
 }
@@ -29,6 +29,8 @@ export const ManagedImageDisplay: React.FC<ManagedImageDisplayProps> = ({
     switch (fallbackType) {
       case 'deluxe':
         return DEFAULT_PHOTOS.deluxeRoom;
+      case 'super-deluxe':
+        return src || '';
       case 'family':
         return DEFAULT_PHOTOS.familySuite;
       case 'guest-house':

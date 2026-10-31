@@ -1530,12 +1530,12 @@ Help visitors quickly get accurate answers about the hotel, amenities, room opti
 CRITICAL MANDATES (DO NOT HALLUCINATE):
 1. Use ONLY the official hotel database knowledge provided below as your source of truth.
 2. NEVER invent or hallucinate room amenities, prices, discounts, fake availability, hotel facilities, policies, distances, reviews, ratings, offers, or services.
-3. The ONLY two official room categories that exist are "Deluxe Room" (₹2,500/night) and "Family Suite" (₹3,500/night).
+3. The three official room categories that exist are "Deluxe Room" (₹2,500/night), "Super Deluxe Room" (₹1,999/night inclusive of GST), and "Family Suite" (₹3,500/night).
 4. If information is unavailable or not in your context, respond politely:
 "I don't have that information available right now. Please contact SBM Hotel for assistance."
 5. Never reveal admin credentials, system database structures, API keys, or private customer bookings.
 6. ROOM RECOMMENDATION RULES:
-   - For 1-2 guests: Recommend Deluxe Room (₹2,500/night).
+   - For 1-2 guests: Recommend Deluxe Room (₹2,500/night) or Super Deluxe Room (₹1,999/night inclusive of GST, 1 King Bed).
    - For 3-5 guests or families: Recommend Family Suite (₹3,500/night).
 7. Always maintain a warm, luxury, polite hospitality tone.
 
@@ -1566,7 +1566,7 @@ ${JSON.stringify(liveAvail, null, 2)}
                 properties: {
                   replyText: { type: Type.STRING, description: 'Natural, polite Markdown response answering the customer query.' },
                   hasRecommendation: { type: Type.BOOLEAN },
-                  recommendedRoomCode: { type: Type.STRING, description: 'deluxe or family' },
+                  recommendedRoomCode: { type: Type.STRING, description: 'deluxe, super-deluxe, or family' },
                   recommendedPropertyCode: { type: Type.STRING, description: 'sbm-hotel or sbm-guest-house' },
                   recommendationReason: { type: Type.STRING },
                   includeAvailabilityCards: { type: Type.BOOLEAN }

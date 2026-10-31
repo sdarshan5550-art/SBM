@@ -3535,6 +3535,8 @@ if (updates.price !== undefined) {
       if (!url || url.trim() === '' || url.startsWith('blob:')) {
         if (img.roomId === 'deluxe' || img.category === 'Deluxe Room') {
           url = DEFAULT_PHOTOS.deluxeRoom;
+        } else if (img.roomId === 'super-deluxe' || img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe') {
+          url = img.imageUrl || '';
         } else if (img.roomId === 'family' || img.category === 'Family Suite') {
           url = DEFAULT_PHOTOS.familySuite;
         } else {
@@ -3552,7 +3554,12 @@ if (updates.price !== undefined) {
 
     if (filters) {
       if (filters.roomId) {
-        list = list.filter(img => img.roomId === filters.roomId || (filters.roomId === 'deluxe' && img.category === 'Deluxe Room') || (filters.roomId === 'family' && img.category === 'Family Suite'));
+        list = list.filter(img =>
+          img.roomId === filters.roomId ||
+          (filters.roomId === 'deluxe' && img.category === 'Deluxe Room') ||
+          (filters.roomId === 'super-deluxe' && (img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe')) ||
+          (filters.roomId === 'family' && img.category === 'Family Suite')
+        );
       }
       if (filters.category && filters.category !== 'all') {
         const cat = filters.category.toLowerCase();
@@ -3562,8 +3569,11 @@ if (updates.price !== undefined) {
             img.category === 'rooms-interiors' ||
             img.category === 'rooms' ||
             img.roomId === 'deluxe' ||
+            img.roomId === 'super-deluxe' ||
             img.roomId === 'family' ||
             img.category === 'Deluxe Room' ||
+            img.category === 'Super Deluxe Room' ||
+            img.category === 'Super Deluxe' ||
             img.category === 'Family Suite'
           );
         } else {
@@ -3604,6 +3614,8 @@ if (updates.price !== undefined) {
     if (!cleanUrl || cleanUrl.trim() === '' || cleanUrl.startsWith('blob:')) {
       if (imageData.roomId === 'deluxe' || imageData.category === 'Deluxe Room') {
         cleanUrl = DEFAULT_PHOTOS.deluxeRoom;
+      } else if (imageData.roomId === 'super-deluxe' || imageData.category === 'Super Deluxe Room' || imageData.category === 'Super Deluxe') {
+        cleanUrl = imageData.imageUrl || '';
       } else if (imageData.roomId === 'family' || imageData.category === 'Family Suite') {
         cleanUrl = DEFAULT_PHOTOS.familySuite;
       } else {
@@ -3795,12 +3807,16 @@ if (updates.price !== undefined) {
     if (!this.data.room_types || !this.data.managed_images) return;
 
     for (const roomType of this.data.room_types) {
-      const rCode = roomType.room_code || (roomType.id.includes('deluxe') ? 'deluxe' : 'family');
+      const rCode = roomType.room_code || (roomType.id.includes('super-deluxe') ? 'super-deluxe' : (roomType.id.includes('deluxe') ? 'deluxe' : 'family'));
       const rName = roomType.name;
 
       // Find all managed images for this room type
       const roomImgs = this.data.managed_images.filter(
-        img => img.roomId === rCode || img.category === rName || (rCode === 'deluxe' && img.category === 'Deluxe Room') || (rCode === 'family' && img.category === 'Family Suite')
+        img => img.roomId === rCode ||
+               img.category === rName ||
+               (rCode === 'deluxe' && img.category === 'Deluxe Room') ||
+               (rCode === 'super-deluxe' && (img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe')) ||
+               (rCode === 'family' && img.category === 'Family Suite')
       );
 
       // Filter out invalid/empty/blob URLs
@@ -3841,8 +3857,11 @@ if (updates.price !== undefined) {
         if (img.category === 'Property Cover') return false;
         if (
           img.roomId === 'deluxe' ||
+          img.roomId === 'super-deluxe' ||
           img.roomId === 'family' ||
           img.category === 'Deluxe Room' ||
+          img.category === 'Super Deluxe Room' ||
+          img.category === 'Super Deluxe' ||
           img.category === 'Family Suite'
         ) {
           return false;
