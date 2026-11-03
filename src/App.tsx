@@ -7,7 +7,7 @@ import { AboutPage } from './pages/AboutPage';
 import { ContactPage } from './pages/ContactPage';
 import { ManageBookingPage } from './pages/ManageBookingPage';
 import { MyAccountPage } from './pages/MyAccountPage';
-import { PoliciesPage } from './pages/PoliciesPage';
+import { PoliciesPage, PolicyTabKey } from './pages/PoliciesPage';
 import { AdminPage } from './pages/AdminPage';
 import { ConciergeChat } from './components/ConciergeChat';
 import { BookingFlowModal } from './components/BookingFlowModal';
@@ -29,6 +29,7 @@ const getInitialTab = () => {
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>(getInitialTab);
   const [propertyCodeParam, setPropertyCodeParam] = useState<string | undefined>(undefined);
+  const [policyTabParam, setPolicyTabParam] = useState<PolicyTabKey>('terms');
   const [socialSettings, setSocialSettings] = useState<SocialMediaSettings | null>(null);
 
   useEffect(() => {
@@ -83,6 +84,13 @@ export default function App() {
     setCurrentTab(page);
     if (params?.code) {
       setPropertyCodeParam(params.code);
+    }
+    if (typeof params === 'string' && ['terms', 'governing', 'privacy', 'refund'].includes(params)) {
+      setPolicyTabParam(params as PolicyTabKey);
+    } else if (params?.policyTab) {
+      setPolicyTabParam(params.policyTab);
+    } else if (page === 'policies') {
+      setPolicyTabParam('terms');
     }
     if (page === 'admin') {
       if (window.location.pathname !== '/decn') {
@@ -164,7 +172,9 @@ export default function App() {
           <MyAccountPage onOpenBookingModal={handleOpenQuickBookingModal} />
         )}
 
-        {currentTab === 'policies' && <PoliciesPage />}
+        {currentTab === 'policies' && (
+          <PoliciesPage initialTab={policyTabParam} onTabChange={setPolicyTabParam} />
+        )}
 
         {currentTab === 'admin' && <AdminPage onOpenBookingModal={handleOpenQuickBookingModal} />}
       </main>
@@ -292,18 +302,25 @@ export default function App() {
 
             {/* Column 4: Policies */}
             <div className="space-y-2.5 text-xs">
-              <h4 className="font-semibold text-[#C5A059] uppercase tracking-[0.2em] text-[11px]">Hotel Policies</h4>
+              <h4 className="font-semibold text-[#C5A059] uppercase tracking-[0.2em] text-[11px]">Legal &amp; Policies</h4>
               <ul className="space-y-2 text-white/60">
-                <li><button onClick={() => handleNavigate('policies')} className="hover:text-white transition-colors">Terms & Conditions</button></li>
-                <li><button onClick={() => handleNavigate('policies')} className="hover:text-white transition-colors">Privacy Policy</button></li>
-                <li><button onClick={() => handleNavigate('policies')} className="hover:text-white transition-colors">Refund & Cancellation</button></li>
+                <li><button onClick={() => handleNavigate('policies', 'terms')} className="hover:text-white transition-colors">Terms &amp; Conditions</button></li>
+                <li><button onClick={() => handleNavigate('policies', 'governing')} className="hover:text-white transition-colors">Governing Law &amp; Jurisdiction</button></li>
+                <li><button onClick={() => handleNavigate('policies', 'privacy')} className="hover:text-white transition-colors">Privacy Policy</button></li>
+                <li><button onClick={() => handleNavigate('policies', 'refund')} className="hover:text-white transition-colors">Refund &amp; Cancellation</button></li>
               </ul>
             </div>
           </div>
 
-          <div className="max-w-7xl mx-auto pt-8 mt-8 border-t border-white/10 flex flex-col sm:flex-row justify-between items-center text-[10px] text-white/40 tracking-wider uppercase">
-            <span>© {new Date().getFullYear()} SBM Hotel, Salasar, Rajasthan. All Rights Reserved.</span>
-            <span className="mt-2 sm:mt-0 text-[#C5A059]/80 font-medium">Pure Vegetarian Family Premises</span>
+          <div className="max-w-7xl mx-auto pt-8 mt-8 border-t border-white/10 flex flex-col sm:flex-row justify-between items-center text-[10px] text-white/40 tracking-wider uppercase gap-2">
+            <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-3 text-center sm:text-left">
+              <span>© {new Date().getFullYear()} SBM Hotel, Salasar, Rajasthan. All Rights Reserved.</span>
+              <span className="hidden sm:inline text-white/20">|</span>
+              <span className="text-white/60 lowercase normal-case tracking-normal text-[11px]">
+                Owned &amp; Managed by <strong className="text-[#C5A059] font-medium tracking-wider uppercase text-[11px]">DEVKI NANDAN PUJARI</strong>
+              </span>
+            </div>
+            <span className="text-[#C5A059]/80 font-medium">Pure Vegetarian Family Premises</span>
           </div>
         </footer>
       )}

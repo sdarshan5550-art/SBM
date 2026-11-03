@@ -1334,7 +1334,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
       {activeTab === 'inventory' && (
         <div className="space-y-6">
           <div className="bg-[#C5A059]/10 border border-[#C5A059]/30 p-4 text-xs text-[#1A1A1A]">
-            <strong>Room Categories Notice:</strong> SBM Hotel inventory comprises three official categories: <strong>Deluxe Room</strong>, <strong>Super Deluxe Room</strong> (₹1,999/night default, inclusive of GST), and <strong>Family Suite</strong>. Tariff modifications saved here are persistently updated across customer listings and real-time reservation engines.
+            <strong>Room Categories Notice:</strong> SBM Hotel 1 inventory comprises three official categories: <strong>Deluxe Room</strong> (₹1,499/night default), <strong>Super Deluxe Room</strong> (₹1,999/night default, inclusive of GST), and <strong>Family Suite</strong> (₹2,999/night default). Tariff modifications saved here are persistently updated across customer listings and real-time reservation engines. SBM Guest House maintains independent pricing.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

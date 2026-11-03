@@ -139,6 +139,21 @@ export const RoomManagementTab: React.FC = () => {
     'family': 3
   };
 
+  const getDefaultRoomPrice = (propertyCode?: string, roomCode?: string): number => {
+    const isHotel1 = !propertyCode || propertyCode === 'sbm-hotel';
+    if (isHotel1) {
+      if (roomCode === 'deluxe') return 1499;
+      if (roomCode === 'super-deluxe') return 1999;
+      if (roomCode === 'family') return 2999;
+      return 1499;
+    } else {
+      // SBM Guest House
+      if (roomCode === 'deluxe') return 2500;
+      if (roomCode === 'family') return 3500;
+      return 2500;
+    }
+  };
+
   const openCreate = () => {
     setEditingRoom(null);
 
@@ -148,6 +163,7 @@ export const RoomManagementTab: React.FC = () => {
       .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99));
 
     const firstRoomType = availableTypes[0];
+    const initialPrice = firstRoomType?.price_per_night || getDefaultRoomPrice(firstProperty?.code, firstRoomType?.room_code);
 
     setForm({
       ...emptyRoom,
@@ -156,7 +172,7 @@ export const RoomManagementTab: React.FC = () => {
       room_type_id: firstRoomType?.id || '',
       room_code: firstRoomType?.room_code || 'deluxe',
       room_name: firstRoomType?.name || 'Deluxe Room',
-      price: firstRoomType?.price_per_night || 2500,
+      price: initialPrice,
       max_guests: firstRoomType?.capacity || 2,
       bed_type: firstRoomType?.bed_information || '1 Double / King Bed',
       facilities: firstRoomType?.amenities || ['Wi-Fi', 'Air Conditioning'],
@@ -184,6 +200,7 @@ export const RoomManagementTab: React.FC = () => {
       .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99));
 
     const type = availableTypes[0];
+    const newPrice = type?.price_per_night || getDefaultRoomPrice(propertyCode, type?.room_code);
 
     setForm(prev => ({
       ...prev,
@@ -192,9 +209,9 @@ export const RoomManagementTab: React.FC = () => {
       room_type_id: type?.id || '',
       room_code: type?.room_code || 'deluxe',
       room_name: type?.name || 'Deluxe Room',
-      price: type?.price_per_night || (type?.room_code === 'super-deluxe' ? 1999 : 2500),
+      price: newPrice,
       max_guests: type?.capacity || 2,
-      bed_type: type?.bed_information || '1 King Size Bed'
+      bed_type: type?.bed_information || (type?.room_code === 'super-deluxe' ? '1 King Size Bed' : '1 Double / King Bed')
     }));
   };
 
@@ -203,12 +220,14 @@ export const RoomManagementTab: React.FC = () => {
 
     if (!type) return;
 
+    const newPrice = type.price_per_night || getDefaultRoomPrice(form.property_code, type.room_code);
+
     setForm(prev => ({
       ...prev,
       room_type_id: type.id,
       room_code: type.room_code,
       room_name: type.name,
-      price: type.price_per_night || (type.room_code === 'super-deluxe' ? 1999 : (type.room_code === 'family' ? 3500 : 2500)),
+      price: newPrice,
       max_guests: type.capacity || (type.room_code === 'family' ? 4 : 2),
       bed_type: type.bed_information || (type.room_code === 'super-deluxe' ? '1 King Size Bed' : '1 Double / King Bed'),
       facilities: type.amenities && type.amenities.length > 0 ? type.amenities : prev.facilities
@@ -244,7 +263,7 @@ export const RoomManagementTab: React.FC = () => {
     try {
       setSaving(true);
 
-      const defaultPrice = form.room_code === 'family' ? 3500 : (form.room_code === 'super-deluxe' ? 1999 : 2500);
+      const defaultPrice = getDefaultRoomPrice(form.property_code, form.room_code);
       const payload = {
         property_code: form.property_code,
         property_name: form.property_name,
@@ -489,7 +508,7 @@ export const RoomManagementTab: React.FC = () => {
 
                     <td className="p-4">
                       <span className="font-serif font-bold text-sm text-[#C5A059]">
-                        ₹{(room.price ?? (room.room_code === 'super-deluxe' ? 1999 : (room.room_code === 'family' ? 3500 : 2500))).toLocaleString('en-IN')}
+                        ₹{(room.price ?? getDefaultRoomPrice(room.property_code, room.room_code)).toLocaleString('en-IN')}
                       </span>
                     </td>
 
@@ -789,14 +808,14 @@ export const RoomManagementTab: React.FC = () => {
                     min="0"
                     step="1"
                     required
-                    value={form.price ?? (form.room_code === 'super-deluxe' ? 1999 : (form.room_code === 'family' ? 3500 : 2500))}
+                    value={form.price ?? getDefaultRoomPrice(form.property_code, form.room_code)}
                     onChange={e =>
                       setForm({
                         ...form,
                         price: Number(e.target.value)
                       })
                     }
-                    placeholder="2500"
+                    placeholder={String(getDefaultRoomPrice(form.property_code, form.room_code))}
                     className="w-full border border-stone-200 p-3 text-sm font-semibold text-[#C5A059]"
                   />
                 </div>

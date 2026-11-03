@@ -30,13 +30,13 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
       .catch(console.error);
   }, []);
 
-  const deluxeRoom = roomTypes.find(r => r.room_code === 'deluxe');
-  const superDeluxeRoom = roomTypes.find(r => r.room_code === 'super-deluxe');
-  const familyRoom = roomTypes.find(r => r.room_code === 'family');
+  const deluxeRoom = roomTypes.find(r => r.property_code === 'sbm-hotel' && r.room_code === 'deluxe');
+  const superDeluxeRoom = roomTypes.find(r => r.property_code === 'sbm-hotel' && r.room_code === 'super-deluxe');
+  const familyRoom = roomTypes.find(r => r.property_code === 'sbm-hotel' && r.room_code === 'family');
 
-  const deluxePrice = deluxeRoom?.price_per_night ?? 2500;
+  const deluxePrice = deluxeRoom?.price_per_night ?? 1499;
   const superDeluxePrice = superDeluxeRoom?.price_per_night ?? 1999;
-  const familyPrice = familyRoom?.price_per_night ?? 3500;
+  const familyPrice = familyRoom?.price_per_night ?? 2999;
 
   // Filter SBM Hotel categories in strict canonical order: 1. Deluxe, 2. Super Deluxe, 3. Family Suite
   const sbmRooms = roomTypes

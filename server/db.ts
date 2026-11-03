@@ -78,6 +78,22 @@ export const CATEGORY_ORDER: Record<string, number> = {
   'family': 3
 };
 
+export const getDefaultRoomPrice = (propertyCode?: string, roomCode?: string): number => {
+  const normProp = (propertyCode || 'sbm-hotel').toLowerCase();
+  const normRoom = (roomCode || 'deluxe').toLowerCase();
+  
+  if (normProp === 'sbm-hotel' || normProp === 'prop-sbm-hotel') {
+    if (normRoom === 'deluxe') return 1499;
+    if (normRoom === 'super-deluxe') return 1999;
+    if (normRoom === 'family') return 2999;
+    return 1499;
+  }
+  // SBM Guest House default pricing remains untouched
+  if (normRoom === 'deluxe') return 2500;
+  if (normRoom === 'family') return 3500;
+  return 2500;
+};
+
 interface DatabaseData {
   properties: Property[];
   room_types: RoomType[];
@@ -205,7 +221,7 @@ function getInitialData(): DatabaseData {
         'Daily Housekeeping',
         'Tea/Coffee Maker'
       ],
-      price_per_night: 2500,
+      price_per_night: 1499,
       tax_percent: 12,
       total_rooms: 10,
       images: ROOM_PHOTOS.sbmDeluxe,
@@ -255,7 +271,7 @@ function getInitialData(): DatabaseData {
         'Daily Housekeeping',
         '24/7 Room Service'
       ],
-      price_per_night: 3500,
+      price_per_night: 2999,
       tax_percent: 12,
       total_rooms: 5,
       images: ROOM_PHOTOS.sbmFamily,
@@ -1135,12 +1151,25 @@ class DatabaseService {
               parsed.room_types.push(superDeluxeRoom);
             }
           }
+
+          // Migrate SBM Hotel 1 default room prices (SBM Hotel 1 only; SBM Guest House untouched)
+          for (const rt of parsed.room_types) {
+            if (rt.property_code === 'sbm-hotel' || rt.property_id === 'prop-sbm-hotel') {
+              if (rt.room_code === 'deluxe' && (rt.price_per_night === 2500 || !rt.price_per_night)) {
+                rt.price_per_night = 1499;
+              } else if (rt.room_code === 'family' && (rt.price_per_night === 3500 || !rt.price_per_night)) {
+                rt.price_per_night = 2999;
+              } else if (rt.room_code === 'super-deluxe' && (!rt.price_per_night || rt.price_per_night === 0)) {
+                rt.price_per_night = 1999;
+              }
+            }
+          }
         }
 
         if (Array.isArray(parsed.physical_rooms)) {
           for (const room of parsed.physical_rooms) {
             if (room.price === undefined) {
-              room.price = room.room_code === 'family' ? 3500 : (room.room_code === 'super-deluxe' ? 1999 : 2500);
+              room.price = getDefaultRoomPrice(room.property_code, room.room_code);
             }
             if (!room.facilities) {
               room.facilities = ['Wi-Fi', 'Air Conditioning'];
@@ -1903,7 +1932,7 @@ if (updates.price !== undefined) {
     const newRoom: PhysicalRoom = {
       ...roomData,
       room_number: roomData.room_number.trim(),
-      price: roomData.price !== undefined ? Number(roomData.price) : (roomData.room_code === 'family' ? 3500 : (roomData.room_code === 'super-deluxe' ? 1999 : 2500)),
+      price: roomData.price !== undefined ? Number(roomData.price) : getDefaultRoomPrice(roomData.property_code, roomData.room_code),
       facilities: roomData.facilities || ['Wi-Fi', 'Air Conditioning'],
       id: `rm-${roomData.property_code}-${roomData.room_number.trim()}`,
       updated_at: new Date().toISOString()

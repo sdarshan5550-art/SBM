@@ -785,7 +785,7 @@ export const ImageManagementTab: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs text-stone-500 mb-4">
-                  Default public room category for 1-2 guests (₹2,500/night). The primary image is shown on room cards across the website.
+                  Default public room category for 1-2 guests (₹1,499/night at SBM Hotel 1, ₹2,500/night at SBM Guest House). The primary image is shown on room cards across the website.
                 </p>
 
                 {/* Primary Cover Image Preview */}
@@ -984,7 +984,7 @@ export const ImageManagementTab: React.FC = () => {
                   </span>
                 </div>
                 <p className="text-xs text-stone-500 mb-4">
-                  Spacious accommodation for 3-5 guests with dual beds and lounge (₹3,500/night). Displayed on public website and booking dialogs.
+                  Spacious accommodation for 3-5 guests with dual beds and lounge (₹2,999/night at SBM Hotel 1, ₹3,500/night at SBM Guest House). Displayed on public website and booking dialogs.
                 </p>
 
                 {/* Primary Cover Image Preview */}

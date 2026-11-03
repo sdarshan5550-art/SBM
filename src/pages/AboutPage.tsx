@@ -172,6 +172,25 @@ export const AboutPage: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* About the Owner Section */}
+        <div className="border border-[#C5A059]/25 bg-[#FAF8F5] p-6 sm:p-8 shadow-xs">
+          <div className="max-w-2xl space-y-2">
+            <span className="text-[10px] font-bold uppercase tracking-[0.25em] text-[#C5A059] block">
+              Leadership &amp; Heritage
+            </span>
+            <h2 className="text-xl sm:text-2xl font-serif text-[#1A1A1A] font-medium">
+              About the Owner
+            </h2>
+            <div className="w-10 h-0.5 bg-[#C5A059] my-2" />
+            <p className="text-xs sm:text-sm text-[#C5A059] font-serif font-semibold tracking-wide">
+              Owned &amp; Managed by DEVKI NANDAN PUJARI
+            </p>
+            <p className="text-xs sm:text-sm text-[#666666] leading-relaxed font-sans pt-1">
+              Rooted in the spiritual heritage of Sri Salasar Balaji Dham, DEVKI NANDAN PUJARI oversees the hospitality operations at SBM Hotel and SBM 2 Guest House with personal dedication to the comfort, dignity, and spiritual peace of visiting pilgrims and families.
+            </p>
+          </div>
+        </div>
       </div>
 
       {/* Outdoor & Property Gallery */}

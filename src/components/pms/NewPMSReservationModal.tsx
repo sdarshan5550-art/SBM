@@ -89,7 +89,9 @@ export const NewPMSReservationModal: React.FC<NewPMSReservationModalProps> = ({
     ? 1
     : Math.ceil(Math.abs(checkOutDate.getTime() - checkInDate.getTime()) / (1000 * 60 * 60 * 24));
 
-  const pricePerNight = selectedRoomType ? selectedRoomType.price_per_night : 2500;
+  const pricePerNight = selectedRoomType
+    ? selectedRoomType.price_per_night
+    : (propertyCode === 'sbm-hotel' ? 1499 : 2500);
   const isInclusive = selectedRoomType?.is_tax_inclusive || selectedRoomType?.room_code === 'super-deluxe';
   let subtotal = 0;
   let tax = 0;
