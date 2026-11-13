@@ -1665,64 +1665,57 @@ async function startServer() {
 
   // Public Coupon Validation
   app.post('/api/coupons/validate', async (req, res) => {
+    let gstPercent = Number(db.getSettings().gst_percent ?? 0);
     try {
+      if (isPostgresAvailable()) gstPercent = await postgresGetGstPercent();
       const { code, roomId, bookingAmount, guestEmail, guestPhone } = req.body;
       const amt = Number(bookingAmount) || 0;
 
       if (!code || typeof code !== 'string') {
+        const taxAmount = Math.round(amt * (gstPercent / 100));
         return res.status(400).json({
           valid: false,
           discountAmount: 0,
           eligibleAmount: amt,
           taxableAmount: amt,
-          taxAmount: Math.round(amt * 0.12),
-          totalAmount: Math.round(amt * 1.12),
+          taxAmount,
+          totalAmount: amt + taxAmount,
           error: 'Coupon code is required.'
         });
       }
 
-      let result;
-      if (isPostgresAvailable()) {
-        try {
-          const pgCoupon = await postgresGetCouponByCode(code);
-          if (pgCoupon) {
-            result = db.validateCoupon({
-              code,
-              roomId,
-              bookingAmount: amt,
-              guestEmail,
-              guestPhone
-            });
-          }
-        } catch (e) {
-          // Fallback to db.validateCoupon
-        }
-      }
-
-      if (!result) {
-        result = db.validateCoupon({
-          code,
-          roomId,
-          bookingAmount: amt,
-          guestEmail,
-          guestPhone
-        });
-      }
+      const result = db.validateCoupon({
+        code,
+        roomId,
+        bookingAmount: amt,
+        guestEmail,
+        guestPhone
+      });
 
       if (!result.valid) {
         return res.status(400).json(result);
       }
 
-      res.json(result);
+      // Coupon discount is calculated by the coupon engine; tax is always
+      // recalculated from the authoritative global Admin GST setting.
+      const taxableAmount = Math.max(0, Number(result.eligibleAmount ?? amt) - Number(result.discountAmount ?? 0));
+      const taxAmount = Math.round(taxableAmount * (gstPercent / 100));
+      res.json({
+        ...result,
+        taxableAmount,
+        taxAmount,
+        totalAmount: taxableAmount + taxAmount
+      });
     } catch (err: any) {
       const amt = Number(req.body.bookingAmount) || 0;
+      const taxAmount = Math.round(amt * (gstPercent / 100));
       res.status(500).json({
         valid: false,
         discountAmount: 0,
         eligibleAmount: amt,
         taxableAmount: amt,
-        taxAmount: Math.round(amt * 0.12),
-        totalAmount: Math.round(amt * 1.12),
+        taxAmount,
+        totalAmount: amt + taxAmount,
         error: err.message || 'Failed to validate coupon.'
       });
     }
@@ -2342,8 +2335,10 @@ res.json({
         try {
           const pgSocial = await postgresGetSocialMediaSettings();
           settings.social_media = pgSocial;
+          settings.gst_percent = await postgresGetGstPercent();
         } catch (e) {
-          // fallback to db.getSettings().social_media
+          console.error('[Admin Settings] Failed to load PostgreSQL settings:', e);
+          return res.status(500).json({ error: 'Could not load the saved settings from PostgreSQL.' });
         }
       }
       res.json(settings);
