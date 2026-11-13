@@ -1532,16 +1532,36 @@ async function startServer() {
       // Idempotent state transitions using unified helper
       if (verifyRes.order_id) {
         const expectedGateway = propertyCode === 'sbm-hotel' ? 'easebuzz' : 'phonepe';
-        const amountInPaise = typeof verifyRes.amount === 'number' ? Math.round(verifyRes.amount * 100) : undefined;
+        let amountInPaise = typeof verifyRes.amount === 'number' ? Math.round(verifyRes.amount * 100) : undefined;
+        let verifiedStatus = verifyRes.status;
+        let verifiedTransactionId = verifyRes.transaction_id;
+
+        // Easebuzz webhook hash authenticates delivery, but server-side status is authoritative.
+        if (propertyCode === 'sbm-hotel') {
+          const easebuzz = paymentGatewayRegistry.getAdapter('easebuzz') as EasebuzzAdapter;
+          const serverCheck = await easebuzz.verifyPayment(
+            paymentGatewayRegistry.getPropertyConfig('sbm-hotel'),
+            { order_id: verifyRes.order_id, transaction_id: verifyRes.transaction_id, property_code: 'sbm-hotel' }
+          );
+          if (!serverCheck.isValid || serverCheck.status !== 'SUCCESS' || serverCheck.order_id !== verifyRes.order_id) {
+            return res.status(400).json({ error: serverCheck.error || 'Easebuzz server-side verification failed.' });
+          }
+          if (typeof serverCheck.amount !== 'number') {
+            return res.status(400).json({ error: 'Easebuzz verification response did not include the paid amount.' });
+          }
+          amountInPaise = Math.round(serverCheck.amount * 100);
+          verifiedStatus = serverCheck.status;
+          verifiedTransactionId = serverCheck.transaction_id;
+        }
 
         const finalizeResult = finalizeBookingPayment({
           orderId: verifyRes.order_id,
-          transactionId: verifyRes.transaction_id,
+          transactionId: verifiedTransactionId,
           propertyCode,
           expectedGateway,
           amountInPaise,
           currency: verifyRes.currency || 'INR',
-          status: verifyRes.status === 'SUCCESS' ? 'COMPLETED' : 'FAILED',
+          status: verifiedStatus === 'SUCCESS' ? 'COMPLETED' : 'FAILED',
           method: propertyCode === 'sbm-hotel' ? 'online_easebuzz' : 'online_phonepe'
         });
 
