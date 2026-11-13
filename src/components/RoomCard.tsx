@@ -12,7 +12,8 @@ interface RoomCardProps {
 
 export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, onSelect }) => {
   const [currentImgIndex, setCurrentImgIndex] = useState(0);
-  const isAvailable = availabilityResult ? availabilityResult.isAvailable : (room.total_rooms > 0);
+  const hasConfiguredPrice = Number(room.price_per_night) > 0;
+  const isAvailable = hasConfiguredPrice && (availabilityResult ? availabilityResult.isAvailable : (room.total_rooms > 0));
   const availableCount = availabilityResult ? availabilityResult.availableRooms : room.total_rooms;
 
   const isSuperDeluxe = room.room_code === 'super-deluxe' || room.id === 'room-sbm-super-deluxe';
@@ -30,6 +31,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
   };
 
   const getUnavailableButton = (): string => {
+    if (!hasConfiguredPrice) return 'PRICE NOT CONFIGURED';
     if (room.total_rooms === 0 || (availabilityResult && availabilityResult.totalRooms === 0)) {
       return 'CURRENTLY NOT AVAILABLE';
     }
@@ -195,11 +197,11 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
             </div>
             <div className="text-right shrink-0">
               <div className="text-xl font-serif font-bold text-[#C5A059]">
-                ₹{room.price_per_night.toLocaleString('en-IN')}
+                {hasConfiguredPrice ? `₹${Number(room.price_per_night).toLocaleString('en-IN')}` : 'Price not configured'}
               </div>
-              <div className="text-[9px] text-[#888888] font-medium uppercase tracking-wider">
+              {hasConfiguredPrice && <div className="text-[9px] text-[#888888] font-medium uppercase tracking-wider">
                 {isTaxInclusive ? 'per night (inclusive of GST)' : 'per night + GST'}
-              </div>
+              </div>}
             </div>
           </div>
 
@@ -283,7 +285,7 @@ export const RoomCard: React.FC<RoomCardProps> = ({ room, availabilityResult, on
         </div>
 
         {/* Pricing Calculation Summary if searching */}
-        {availabilityResult && (
+        {availabilityResult && hasConfiguredPrice && (
           <div className="bg-[#FDFCFB] p-3 border border-stone-200 text-xs flex justify-between items-center">
             <div>
               <span className="text-[#666666]">Total for {availabilityResult.nights} Night(s):</span>
