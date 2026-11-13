@@ -1172,15 +1172,21 @@ class DatabaseService {
             if (legacySeedPrices[key] !== undefined &&
                 Number(roomType.price_per_night) === legacySeedPrices[key]) {
               roomType.price_per_night = 0;
-              for (const physicalRoom of parsed.physical_rooms || []) {
-                if (physicalRoom.room_type_id === roomType.id ||
-                    (physicalRoom.property_code === roomType.property_code &&
-                     physicalRoom.room_code === roomType.room_code)) {
-                  if (Number(physicalRoom.price) === legacySeedPrices[key]) {
-                    physicalRoom.price = 0;
-                  }
-                }
-              }
+            }
+          }
+
+          // Keep physical-room admin displays aligned with the authoritative category tariff.
+          for (const physicalRoom of parsed.physical_rooms || []) {
+            const parentRoomType = (parsed.room_types || []).find(roomType =>
+              roomType.id === physicalRoom.room_type_id ||
+              (roomType.property_code === physicalRoom.property_code &&
+               roomType.room_code === physicalRoom.room_code)
+            );
+            if (parentRoomType) {
+              const configuredPrice = Number(parentRoomType.price_per_night);
+              physicalRoom.price = Number.isFinite(configuredPrice) && configuredPrice > 0
+                ? configuredPrice
+                : 0;
             }
           }
           parsed.room_pricing_admin_only_migrated = true;
