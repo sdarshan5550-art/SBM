@@ -349,6 +349,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
         room_code: selectedRoom.room_code,
         start_date: newBlockStart,
         end_date: endDateExclusive,
+        end_date_inclusive: true,
         quantity: Number(newBlockQty),
         reason: newBlockReason
       });
@@ -1602,7 +1603,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                     {blockedRooms.map(blk => (
                       <tr key={blk.id}>
                         <td className="p-3 font-semibold text-[#C5A059]">{blk.property_code} — {blk.room_code}</td>
-                        <td className="p-3">{blk.start_date} to {(() => { const d = new Date(`${blk.end_date}T00:00:00.000Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })()}</td>
+                        <td className="p-3">{blk.start_date} to {blk.end_date_inclusive ? (() => { const d = new Date(`${blk.end_date}T00:00:00.000Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })() : blk.end_date}</td>
                         <td className="p-3">{blk.quantity} Room(s)</td>
                         <td className="p-3 text-[#666666]">{blk.reason}</td>
                         <td className="p-3">
