@@ -1442,20 +1442,32 @@ async function startServer() {
         return res.redirect(`${appUrl}/manage-booking?booking_number=${booking.booking_number}&payment_status=failed&error=Invalid+hash`);
       }
 
-      const isSuccess = (status || '').toLowerCase() === 'success';
-      const parsedAmount = amount ? parseFloat(amount) : undefined;
+      // A browser return is untrusted until Easebuzz confirms the transaction
+      // independently through its server-to-server Transaction V2 API.
+      const verification = await adapter.verifyPayment(sbm1Config, {
+        order_id: txnid,
+        transaction_id: easepayid || txnid,
+        property_code: 'sbm-hotel',
+        raw_payload: data
+      });
+
+      if (!verification.isValid || verification.status !== 'SUCCESS' || verification.order_id !== txnid) {
+        console.warn(`[Easebuzz Callback] Server-side verification rejected txnid=${txnid}: ${verification.error || verification.status}`);
+        return res.redirect(`${appUrl}/manage-booking?booking_number=${booking.booking_number}&payment_status=failed&error=Payment+verification+failed`);
+      }
+
+      const parsedAmount = typeof verification.amount === 'number' ? verification.amount : undefined;
       const amountInPaise = parsedAmount !== undefined ? Math.round(parsedAmount * 100) : undefined;
 
-      // 4. Finalize payment using unified helper
       const finalizeResult = finalizeBookingPayment({
         bookingIdOrNumber: booking.id,
         orderId: txnid,
-        transactionId: easepayid || txnid,
+        transactionId: verification.transaction_id || easepayid || txnid,
         propertyCode: 'sbm-hotel',
         expectedGateway: 'easebuzz',
         amountInPaise,
-        currency: 'INR',
-        status: isSuccess ? 'COMPLETED' : 'FAILED',
+        currency: verification.currency || 'INR',
+        status: 'COMPLETED',
         method: 'online_easebuzz',
         signature: hash
       });
