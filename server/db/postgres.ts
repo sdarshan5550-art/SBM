@@ -273,7 +273,7 @@ if (!fs.existsSync(jsonPath)) return;
           b.room_number || null,
           b.check_in,
           b.check_out,
-          b.price_per_night || 2500,
+          Number(b.price_per_night) || 0,
           b.nights || 1,
           b.booking_status === 'Cancelled' ? 'CANCELLED' : (b.booking_status === 'Checked In' ? 'CHECKED_IN' : 'ACTIVE')
         ]);
