@@ -3769,6 +3769,10 @@ res.json({
       }
 
       if (!sampleBooking) {
+        const sampleRoomRate = Number(
+          db.getRoomTypes('sbm-hotel').find(room => room.room_code === 'deluxe')?.price_per_night
+        ) || 0;
+        const sampleTax = Math.round(sampleRoomRate * ((Number(db.getSettings().gst_percent) || 12) / 100));
         sampleBooking = {
           id: 'test-bk-101',
           booking_number: 'SBM-2026-TEST',
@@ -3787,11 +3791,11 @@ res.json({
           check_in: new Date().toISOString().split('T')[0],
           check_out: new Date(Date.now() + 86400000).toISOString().split('T')[0],
           nights: 1,
-          price_per_night: 1499,
-          room_subtotal: 1499,
-          tax_amount: 180,
-          total_amount: 1679,
-          paid_amount: 1679,
+          price_per_night: sampleRoomRate,
+          room_subtotal: sampleRoomRate,
+          tax_amount: sampleTax,
+          total_amount: sampleRoomRate + sampleTax,
+          paid_amount: sampleRoomRate + sampleTax,
           outstanding_amount: 0,
           payment_status: 'Completed',
           booking_status: 'Confirmed',
