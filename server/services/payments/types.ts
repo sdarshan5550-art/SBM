@@ -1,6 +1,6 @@
 import { PropertyCode } from '../../../src/types';
 
-export type PaymentGatewayProviderType = 'razorpay' | 'phonepe' | 'cashfree' | 'stripe';
+export type PaymentGatewayProviderType = 'easebuzz' | 'phonepe' | 'razorpay' | 'cashfree' | 'stripe';
 
 export interface PropertyGatewayConfig {
   property_code: PropertyCode;
@@ -11,6 +11,9 @@ export interface PropertyGatewayConfig {
   client_secret?: string;
   client_version?: number;
   phonepe_env?: 'SANDBOX' | 'PRODUCTION';
+  easebuzz_env?: 'test' | 'prod' | 'live';
+  webhook_username?: string;
+  webhook_password?: string;
   bank_account_name: string;
   settlement_account_number: string;
   is_configured: boolean;
@@ -74,7 +77,10 @@ export interface VerifyPaymentResult {
 
 export interface WebhookVerifyParams {
   rawBody: string;
+  rawBodyString?: string;
   signatureHeader: string;
+  authorizationHeader?: string;
+  headers?: Record<string, string | string[] | undefined>;
   property_code: PropertyCode;
 }
 

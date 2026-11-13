@@ -56,7 +56,7 @@ export const PMSPaymentsTab: React.FC = () => {
   const totalCollected = filteredPayments.reduce((sum, p) => sum + (p.status === 'PAID' ? Number(p.amount) : 0), 0);
   const cashCollected = filteredPayments.filter((p) => p.method === 'CASH').reduce((sum, p) => sum + Number(p.amount), 0);
   const upiCollected = filteredPayments.filter((p) => p.method === 'UPI').reduce((sum, p) => sum + Number(p.amount), 0);
-  const onlineCollected = filteredPayments.filter((p) => p.method?.startsWith('ONLINE_') || p.provider === 'RAZORPAY' || p.provider === 'PHONEPE').reduce((sum, p) => sum + Number(p.amount), 0);
+  const onlineCollected = filteredPayments.filter((p) => p.method?.startsWith('ONLINE_') || p.provider === 'RAZORPAY' || p.provider === 'PHONEPE' || p.provider === 'EASEBUZZ').reduce((sum, p) => sum + Number(p.amount), 0);
 
   return (
     <div className="space-y-6">
@@ -100,7 +100,7 @@ export const PMSPaymentsTab: React.FC = () => {
 
         <div className="bg-white border border-stone-200 p-5 shadow-sm">
           <span className="text-[10px] font-bold uppercase tracking-widest text-stone-500 block mb-1">
-            Online (PhonePe & Gateway)
+            Online (Easebuzz & PhonePe)
           </span>
           <div className="text-2xl font-serif font-bold text-stone-900">
             ₹{onlineCollected.toLocaleString('en-IN')}
@@ -136,7 +136,8 @@ export const PMSPaymentsTab: React.FC = () => {
               <option value="CASH">Cash</option>
               <option value="UPI">UPI</option>
               <option value="CARD">Card</option>
-              <option value="ONLINE_RAZORPAY">Online (PhonePe)</option>
+              <option value="ONLINE_EASEBUZZ">Online (Easebuzz - SBM1)</option>
+              <option value="ONLINE_PHONEPE">Online (PhonePe - SBM2)</option>
             </select>
           </div>
         </div>

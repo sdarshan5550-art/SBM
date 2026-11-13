@@ -1,67 +1,84 @@
 # SBM Hotel & Guest House — Multi-Property Payment Gateway Architecture & Configuration Guide
 
-This document defines the multi-property payment gateway architecture, environment configuration requirements, security controls, and webhook integration guidelines for **SBM 1 (SBM Hotel)** and **SBM 2 (SBM 2 Guest House)**.
+This document defines the production multi-property payment gateway architecture, environment configuration requirements, security controls, and webhook integration guidelines for **SBM 1 (SBM Hotel)** and **SBM 2 (SBM 2 Guest House)**.
 
 ---
 
-## 1. Environment Variables Required
+## 1. Property and Gateway Isolation
 
-Each property operates an independent merchant account, gateway provider, and settlement bank account. Credentials must never be shared between SBM 1 and SBM 2.
+Each property operates an independent merchant account, gateway provider, and settlement bank account. Credentials, settlement accounts, and callbacks are completely isolated and never mixed.
+
+* **SBM 1: SBM Hotel (`sbm-hotel`)**: Easebuzz Hosted Checkout (LIVE Environment: `https://pay.easebuzz.in`)
+* **SBM 2: SBM 2 Guest House (`sbm-guest-house`)**: PhonePe Standard Checkout SDK (PRODUCTION Environment)
+
+---
+
+## 2. Environment Variables Required
 
 ### Global Settings
 * `NODE_ENV`: Set to `"production"` in production environments to enforce strict validation.
-* `ALLOW_PAYMENT_SIMULATION`: Must be set to `"false"` in production. Set to `"true"` **only** during local development or sandbox testing.
+* `ALLOW_PAYMENT_SIMULATION`: Must be set to `"false"` in production. Set to `"true"` only during offline local testing.
 * `APP_URL`: The production public base URL (e.g., `https://sbmhotel.com`).
 
-### SBM 1: SBM Hotel (Primary Property)
-* `SBM1_PAYMENT_GATEWAY_PROVIDER`: Gateway provider type (`razorpay` | `phonepe` | `cashfree` | `stripe`).
-* `SBM1_MERCHANT_ID`: Merchant identifier for SBM Hotel.
-* `SBM1_BANK_ACCOUNT_NAME`: Bank account name for settlements (e.g., `"SBM Hotel Salasar Current A/C (HDFC Bank)"`).
-* `SBM1_SETTLEMENT_ACCOUNT_NUMBER`: Bank account number for settlement verification.
-* `SBM1_GATEWAY_KEY_ID`: API Key ID / App ID / Publishable Key from the provider dashboard.
-* `SBM1_GATEWAY_KEY_SECRET`: API Key Secret / Salt Key from the provider dashboard.
-* `SBM1_GATEWAY_WEBHOOK_SECRET`: Webhook signing secret for cryptographically verifying incoming callbacks.
+### SBM 1: SBM Hotel (`sbm-hotel`) — Easebuzz Hosted Checkout
+* `SBM1_PAYMENT_GATEWAY_PROVIDER`: Fixed to `easebuzz`.
+* `SBM1_GATEWAY_KEY_ID`: Easebuzz Merchant Key.
+* `SBM1_GATEWAY_KEY_SECRET`: Easebuzz Merchant Salt (Private - never exposed in client).
+* `SBM1_EASEBUZZ_ENV`: `live` (Production endpoint `https://pay.easebuzz.in`) or `test`.
+* `SBM1_BANK_ACCOUNT_NAME`: Bank account name for settlements (e.g., `"SBM Hotel Salasar Current A/C"`).
+* `SBM1_SETTLEMENT_ACCOUNT_NUMBER`: Settlement bank account number.
+* Callback / SURL / FURL URL: `https://sbmhotel.com/api/payments/easebuzz/callback`
 
-### SBM 2: SBM 2 Guest House (Secondary Property)
-* `SBM2_PAYMENT_GATEWAY_PROVIDER`: Gateway provider type (`razorpay` | `phonepe` | `cashfree` | `stripe`).
-* `SBM2_MERCHANT_ID`: Merchant identifier for SBM 2 Guest House.
-* `SBM2_BANK_ACCOUNT_NAME`: Bank account name for settlements (e.g., `"SBM 2 Guest House Current A/C (ICICI Bank)"`).
-* `SBM2_SETTLEMENT_ACCOUNT_NUMBER`: Bank account number for settlement verification.
-* `SBM2_GATEWAY_KEY_ID`: API Key ID / App ID / Publishable Key from the provider dashboard.
-* `SBM2_GATEWAY_KEY_SECRET`: API Key Secret / Salt Key from the provider dashboard.
-* `SBM2_GATEWAY_WEBHOOK_SECRET`: Webhook signing secret for cryptographically verifying incoming callbacks.
-
----
-
-## 2. Provider Dashboard Settings & Webhook URLs
-
-### Required Webhook Endpoints
-Configure the following webhook URLs in each provider's dashboard:
-* **SBM Hotel (SBM 1)**: `https://sbmhotel.com/api/payments/webhook/sbm-hotel`
-* **SBM 2 Guest House (SBM 2)**: `https://sbmhotel.com/api/payments/webhook/sbm-guest-house`
-
-### Recommended Dashboard Events to Subscribe:
-* `order.paid` / `payment.captured`
-* `payment.failed`
-* `refund.processed`
+### SBM 2: SBM 2 Guest House (`sbm-guest-house`) — PhonePe Standard Checkout SDK
+* `SBM2_PAYMENT_GATEWAY_PROVIDER`: Fixed to `phonepe`.
+* `SBM2_GATEWAY_KEY_ID` / `SBM2_PHONEPE_CLIENT_ID`: PhonePe Client ID assigned by PhonePe.
+* `SBM2_GATEWAY_KEY_SECRET` / `SBM2_PHONEPE_CLIENT_SECRET`: PhonePe Client Secret (Private - never exposed in client).
+* `SBM2_PHONEPE_CLIENT_VERSION`: PhonePe Client Version (e.g., `1`).
+* `SBM2_PHONEPE_ENV`: `PRODUCTION` (or `SANDBOX` for testing).
+* `SBM2_PHONEPE_WEBHOOK_USERNAME`: PhonePe Webhook authentication username configured on the PhonePe merchant dashboard.
+* `SBM2_PHONEPE_WEBHOOK_PASSWORD`: PhonePe Webhook authentication password configured on the PhonePe merchant dashboard.
+* `SBM2_BANK_ACCOUNT_NAME`: Bank account name for settlements (e.g., `"SBM 2 Guest House Current A/C"`).
+* `SBM2_SETTLEMENT_ACCOUNT_NUMBER`: Settlement bank account number.
+* Webhook URL: `https://sbmhotel.com/api/payments/webhook/sbm-guest-house`
 
 ---
 
-## 3. Deployment Environment Configuration Instructions
+## 3. Webhook & Callback Authentication
 
-Where to configure actual environment variables depending on your infrastructure:
-1. **Cloud Run / Google Cloud**: Configure environment variables in the Cloud Run service revision settings or via Secret Manager mounted as environment variables.
-2. **Coolify / Docker / VPS (Node.js)**: Define variables in your `.env` file located in the application root directory (`.env`), or in the Coolify project environment variable manager.
-3. **Vercel / PaaS**: Set production environment variables in project settings under **Environment Variables**. Ensure server-side variables are not exposed to the client bundle (Vite injects only `VITE_*` prefixed variables to the browser).
+### PhonePe Standard Checkout Callback Validation
+PhonePe callbacks are validated strictly through the official SDK method:
+```javascript
+const callbackResponse = client.validateCallback(
+  username,
+  password,
+  authorizationHeader,
+  responseBodyString
+);
+```
+* **Raw Request Body**: The exact original HTTP request body is preserved via Express middleware (`req.rawBody`) and passed unmodified to `validateCallback`.
+* **Authorization Header**: Passed directly from incoming HTTP `Authorization` (or `x-verify`) header.
+* **SDK Context**: Operates safely without mutating global token contexts or leaking across concurrent sessions.
+
+### Easebuzz Hosted Checkout Callback Validation
+Easebuzz callbacks are verified using reverse SHA-512 checksum:
+`sha512(salt|status|udf10|udf9|udf8|udf7|udf6|udf5|udf4|udf3|udf2|udf1|email|firstname|productinfo|amount|txnid|key)`
 
 ---
 
-## 4. Security & Production Guardrails
-* **No Secret Exposure**: Secret keys (`key_secret`, `webhook_secret`) are never exposed to the frontend, browser responses, client logs, or source control.
-* **Strict Production Validation**: In `NODE_ENV=production`, if credentials are missing or default test keys are detected without explicit sandbox allowance (`ALLOW_PAYMENT_SIMULATION=true`), the backend throws a fatal configuration error rather than falling back to simulated payments.
-* **Property Routing**: Payment orders and webhooks are strictly validated against the trusted property ID (`sbm-hotel` vs `sbm-guest-house`) to ensure settlements flow to the correct bank account.
+## 4. Unified Payment Verification & Idempotency
+
+All payment completions (via client verify, callbacks, and webhooks) are routed through a single unified finalization function enforcing:
+1. **Booking Existence**: Booking must exist in the database.
+2. **Order Match**: Order ID and transaction ID must match the booking record.
+3. **Property Ownership**: Booking `property_code` must match the transaction (`sbm-hotel` vs `sbm-guest-house`).
+4. **Gateway Match**: Gateway provider must match the property (`sbm-hotel` = `easebuzz`, `sbm-guest-house` = `phonepe`).
+5. **Status Verification**: Status must be `COMPLETED` / `SUCCESS`.
+6. **Paise Normalization & Exact Amount Match**: Both PhonePe integer paise and Easebuzz rupee amounts are normalized to integer paise before comparing with `Math.round(booking.total_amount * 100)`.
+7. **Currency Verification**: Must be `INR`.
+8. **Idempotency Protection**: Duplicate callbacks return confirmed status without double-crediting or duplicate customer notifications.
 
 ---
 
-## 5. Operational Status Notice
-**Do not claim real payments are operational until live production credentials have been configured in the deployment environment and sandbox/live transaction tests have successfully passed.**
+## 5. Security & Production Guardrails
+* **Zero Secret Exposure**: Merchant Salt, Client Secret, and Webhook Passwords are never sent to the frontend or printed in application logs.
+* **No Mock Fallback**: In production (`ALLOW_PAYMENT_SIMULATION=false`), all payments require genuine gateway confirmation; no simulated success is generated.

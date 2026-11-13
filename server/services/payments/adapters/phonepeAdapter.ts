@@ -4,7 +4,6 @@ import {
   RefundRequest,
   Env
 } from 'phonepe-pg-sdk-node';
-import { TokenService } from 'phonepe-pg-sdk-node/dist/common/tokenhandler/TokenService';
 import {
   IPaymentGatewayAdapter,
   PaymentGatewayProviderType,
@@ -22,46 +21,22 @@ import {
 export class PhonePeAdapter implements IPaymentGatewayAdapter {
   public readonly provider: PaymentGatewayProviderType = 'phonepe';
   private clients: Map<string, StandardCheckoutClient> = new Map();
-  private merchantTokens: Map<string, any> = new Map();
-
-  private setTokenContext(clientId: string): void {
-    try {
-      (TokenService as any).oAuthResponse = this.merchantTokens.get(clientId) || null;
-    } catch {
-      // ignore
-    }
-  }
-
-  private saveTokenContext(clientId: string): void {
-    try {
-      const current = (TokenService as any).oAuthResponse;
-      if (current) {
-        this.merchantTokens.set(clientId, current);
-      }
-    } catch {
-      // ignore
-    }
-  }
 
   private getClient(config: PropertyGatewayConfig): StandardCheckoutClient {
     const clientId = config.client_id || config.key_id;
     const clientSecret = config.client_secret || config.key_secret;
     const clientVersion = config.client_version || 1;
-    const isLive = config.phonepe_env === 'PRODUCTION' ||
-                   config.mode === 'live' ||
-                   clientId?.startsWith('SU') ||
-                   config.merchant_id?.startsWith('M');
-    const env = isLive ? Env.PRODUCTION : Env.SANDBOX;
+    const phonepeEnvStr = String(config.phonepe_env || '').toUpperCase();
+    const env = phonepeEnvStr === 'SANDBOX' ? Env.SANDBOX : Env.PRODUCTION;
 
     if (!clientId || !clientSecret) {
-      const prefix = config.property_code === 'sbm-hotel' ? 'SBM1_PHONEPE' : 'SBM2_PHONEPE';
       throw new Error(
         `PhonePe Standard Checkout credentials missing or unconfigured for ${config.property_name} (${config.property_code}). ` +
-        `Please configure ${prefix}_CLIENT_ID and ${prefix}_CLIENT_SECRET in environment variables.`
+        `Please configure SBM2_PHONEPE_CLIENT_ID and SBM2_PHONEPE_CLIENT_SECRET in environment variables.`
       );
     }
 
-    const cacheKey = `${config.property_code}_${clientId}_${env}`;
+    const cacheKey = `${config.property_code}_${clientId}_${clientVersion}_${env}`;
     let client = this.clients.get(cacheKey);
     if (!client) {
       client = StandardCheckoutClient.getInstance(clientId, clientSecret, clientVersion, env, false);
@@ -75,13 +50,12 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
     params: CreateOrderParams
   ): Promise<PaymentOrderResult> {
     const client = this.getClient(config);
-    const clientId = config.client_id || config.key_id;
     const merchantOrderId = `TXN_${params.receipt.replace(/[^A-Za-z0-9]/g, '_')}_${Date.now()}`.slice(0, 60);
     const amountInPaise = params.amountInPaise;
     const redirectUrl = params.returnUrl || `${process.env.APP_URL || 'https://sbmhotel.com'}/manage-booking?booking_number=${params.receipt}`;
 
     console.log(
-      `[PhonePe Standard Checkout - ${config.property_code}] Initiating Order: orderId=${merchantOrderId}, amount=${amountInPaise} paise, env=${config.phonepe_env || 'SANDBOX'}`
+      `[PhonePe Standard Checkout - ${config.property_code}] Initiating Order: orderId=${merchantOrderId}, amount=${amountInPaise} paise, env=${config.phonepe_env || 'PRODUCTION'}`
     );
 
     const payRequest = StandardCheckoutPayRequest.builder()
@@ -90,10 +64,8 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
       .redirectUrl(redirectUrl)
       .build();
 
-    this.setTokenContext(clientId);
     try {
       const response = await client.pay(payRequest);
-      this.saveTokenContext(clientId);
 
       if (!response || !response.redirectUrl) {
         throw new Error(`PhonePe Standard Checkout: No checkout redirect URL returned by PhonePe API.`);
@@ -122,12 +94,11 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
         raw_response: response
       };
     } catch (err: any) {
-      this.saveTokenContext(clientId);
       console.error(`[PhonePe Standard Checkout Error - ${config.property_code}]`, err.message || err);
 
-      // Fallback simulation mode for demonstration if credentials are sandbox/mock
-      if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_PAYMENT_SIMULATION === 'true' || config.mode === 'test' || clientId.startsWith('rzp_') || clientId.length < 30) {
-        console.log(`[PhonePe Simulator - ${config.property_code}] Falling back to simulated checkout URL for testing/demo.`);
+      // Simulation fallback strictly controlled by ALLOW_PAYMENT_SIMULATION
+      if (process.env.ALLOW_PAYMENT_SIMULATION === 'true') {
+        console.warn(`[PhonePe Simulator - ${config.property_code}] Simulation mode explicitly enabled via ALLOW_PAYMENT_SIMULATION=true.`);
         const simulatedUrl = `${process.env.APP_URL || 'https://sbmhotel.com'}/manage-booking?booking_number=${params.receipt}&payment_status=success`;
         return {
           order_id: merchantOrderId,
@@ -138,7 +109,7 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
           property_code: config.property_code,
           property_name: config.property_name,
           bank_account_name: config.bank_account_name,
-          settlement_account_hint: `${config.bank_account_name} (A/C •••• 1234)`,
+          settlement_account_hint: `${config.bank_account_name}`,
           merchant_id: config.client_id || config.key_id,
           payment_url: simulatedUrl,
           raw_response: { simulated: true, error: err.message }
@@ -155,15 +126,12 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
     params: VerifyPaymentParams
   ): Promise<VerifyPaymentResult> {
     const client = this.getClient(config);
-    const clientId = config.client_id || config.key_id;
     const merchantOrderId = params.order_id || params.transaction_id;
 
     console.log(`[PhonePe Standard Checkout - ${config.property_code}] Verifying Order Status: orderId=${merchantOrderId}`);
 
-    this.setTokenContext(clientId);
     try {
       const orderStatus = await client.getOrderStatus(merchantOrderId, true);
-      this.saveTokenContext(clientId);
 
       console.log(`[PhonePe Standard Checkout - ${config.property_code}] Order Status Response: state=${orderStatus?.state}`);
 
@@ -199,19 +167,67 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
     params: WebhookVerifyParams
   ): Promise<WebhookVerifyResult> {
     try {
-      const body = typeof params.rawBody === 'string' ? JSON.parse(params.rawBody) : params.rawBody;
-      const state = (body?.data?.state || '').toUpperCase();
+      const client = this.getClient(config);
+      const username = config.webhook_username || process.env.SBM2_PHONEPE_WEBHOOK_USERNAME || '';
+      const password = config.webhook_password || process.env.SBM2_PHONEPE_WEBHOOK_PASSWORD || '';
+
+      const authHeader =
+        params.authorizationHeader ||
+        (params.headers?.['authorization'] as string) ||
+        (params.headers?.['Authorization'] as string) ||
+        params.signatureHeader ||
+        '';
+
+      const rawBodyString = params.rawBodyString || (
+        typeof params.rawBody === 'string' ? params.rawBody : JSON.stringify(params.rawBody)
+      );
+
+      if (!username || !password) {
+        console.warn(`[PhonePe Webhook - ${config.property_code}] Webhook username or password not configured (SBM2_PHONEPE_WEBHOOK_USERNAME / SBM2_PHONEPE_WEBHOOK_PASSWORD).`);
+        return {
+          isValid: false,
+          error: 'PhonePe webhook credentials unconfigured.'
+        };
+      }
+
+      if (!authHeader) {
+        console.warn(`[PhonePe Webhook - ${config.property_code}] Missing Authorization header in PhonePe webhook request.`);
+        return {
+          isValid: false,
+          error: 'Missing Authorization header.'
+        };
+      }
+
+      // Official PhonePe Standard Checkout SDK callback validation:
+      // client.validateCallback(username, password, authorizationHeader, responseBodyString)
+      const callbackResponse = client.validateCallback(
+        username,
+        password,
+        authHeader,
+        rawBodyString
+      );
+
+      console.log(`[PhonePe Webhook - ${config.property_code}] Callback validated successfully via PhonePe SDK.`);
+
+      const payload = callbackResponse.payload;
+      const state = (payload?.state || '').toUpperCase();
+      const isSuccess = state === 'COMPLETED';
+
       return {
-        isValid: true,
-        order_id: body?.data?.merchantOrderId,
-        transaction_id: body?.data?.orderId,
-        status: state === 'COMPLETED' ? 'SUCCESS' : (state === 'FAILED' ? 'FAILED' : 'OTHER'),
-        amount: body?.data?.amount ? body.data.amount / 100 : undefined,
-        currency: 'INR'
+        isValid: isSuccess,
+        order_id: payload?.merchantOrderId || payload?.orderId,
+        transaction_id: payload?.orderId,
+        amount: typeof payload?.amount === 'number' ? payload.amount / 100 : undefined,
+        currency: 'INR',
+        status: isSuccess ? 'SUCCESS' : (state === 'FAILED' ? 'FAILED' : 'OTHER'),
+        error: isSuccess ? undefined : (payload?.detailedErrorCode || payload?.errorCode || `PhonePe payment state: ${state}`)
       };
     } catch (err: any) {
       console.error(`[PhonePe Webhook Error - ${config.property_code}]`, err.message || err);
-      return { isValid: false, error: err.message || 'Webhook verification failed' };
+      return {
+        isValid: false,
+        error: `PhonePe webhook verification failed: ${err.message || 'Invalid callback'}`
+      };
     }
   }
 

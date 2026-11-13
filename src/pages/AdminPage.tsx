@@ -195,6 +195,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
   const [sendingTestEmail, setSendingTestEmail] = useState(false);
   const [testEmailResult, setTestEmailResult] = useState<string | null>(null);
 
+  // Property Payment Gateways state (SBM1 Easebuzz, SBM2 PhonePe)
+  const [gatewayConfigs, setGatewayConfigs] = useState<Record<string, any> | null>(null);
+  const [editingSbm1Key, setEditingSbm1Key] = useState('');
+  const [editingSbm1Secret, setEditingSbm1Secret] = useState('');
+  const [editingSbm1Env, setEditingSbm1Env] = useState<'test' | 'live'>('test');
+  const [editingSbm2Key, setEditingSbm2Key] = useState('');
+  const [editingSbm2Secret, setEditingSbm2Secret] = useState('');
+  const [editingSbm2Env, setEditingSbm2Env] = useState<'SANDBOX' | 'PRODUCTION'>('SANDBOX');
+  const [savingGateway, setSavingGateway] = useState<'sbm1' | 'sbm2' | null>(null);
+  const [gatewayMsg, setGatewayMsg] = useState<{ property: string; text: string; error?: boolean } | null>(null);
+
   // Check Token on load
   useEffect(() => {
     const token = getAdminToken();
@@ -250,6 +261,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
       }
     }).catch(console.error);
     api.email.getStatus().then(setEmailStatus).catch(console.error);
+    api.adminGetGatewayConfigs().then((cfgs) => {
+      setGatewayConfigs(cfgs);
+      if (cfgs['sbm-hotel']) {
+        setEditingSbm1Key(cfgs['sbm-hotel'].key_id || '');
+        setEditingSbm1Env(cfgs['sbm-hotel'].easebuzz_env || cfgs['sbm-hotel'].mode || 'test');
+      }
+      if (cfgs['sbm-guest-house']) {
+        setEditingSbm2Key(cfgs['sbm-guest-house'].key_id || cfgs['sbm-guest-house'].merchant_id || '');
+        setEditingSbm2Env(cfgs['sbm-guest-house'].phonepe_env || 'SANDBOX');
+      }
+    }).catch(console.error);
   };
 
   const refreshBookings = () => {
@@ -2086,6 +2108,292 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                 <RotateCcw className="w-3.5 h-3.5 text-stone-500" />
                 <span>Reset / Cancel</span>
               </button>
+            </div>
+          </div>
+
+          {/* Payment Gateway Isolation & Configuration Card */}
+          <div className="border-t border-stone-200 pt-5 mt-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-serif font-bold text-stone-800 text-sm flex items-center gap-2">
+                  <CreditCard className="w-4 h-4 text-[#C5A059]" />
+                  <span>Property Payment Gateways (Isolated SBM1 & SBM2)</span>
+                </h4>
+                <p className="text-xs text-stone-500 mt-0.5">
+                  Strict property isolation: SBM 1 routes exclusively to Easebuzz; SBM 2 routes exclusively to PhonePe.
+                </p>
+              </div>
+              <span className="text-[10px] px-2.5 py-1 font-bold uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-300 rounded">
+                Dual Gateway Routing Active
+              </span>
+            </div>
+
+            {gatewayMsg && (
+              <div
+                className={`p-3 text-xs rounded border flex items-center justify-between ${
+                  gatewayMsg.error
+                    ? 'bg-rose-50 border-rose-200 text-rose-800'
+                    : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                }`}
+              >
+                <span>{gatewayMsg.text}</span>
+                <button
+                  type="button"
+                  onClick={() => setGatewayMsg(null)}
+                  className="font-bold ml-2 text-xs hover:opacity-75"
+                >
+                  &times;
+                </button>
+              </div>
+            )}
+
+            {/* SBM 1 – Easebuzz Card */}
+            <div className="bg-[#FDFCFB] border border-amber-200/70 p-4 space-y-3.5 rounded-xs">
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-[10px] font-bold">
+                    1
+                  </div>
+                  <div>
+                    <span className="font-serif font-bold text-sm text-[#1A1A1A]">
+                      SBM 1 &ndash; SBM Hotel (Easebuzz)
+                    </span>
+                    <span className="text-[10px] text-stone-500 block">
+                      Assigned Provider: <strong>Easebuzz Standard Hosted Checkout</strong>
+                    </span>
+                  </div>
+                </div>
+                <span
+                  className={`text-[10px] px-2 py-0.5 font-bold uppercase ${
+                    gatewayConfigs?.['sbm-hotel']?.is_configured
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      : 'bg-amber-100 text-amber-800 border border-amber-300'
+                  }`}
+                >
+                  {gatewayConfigs?.['sbm-hotel']?.is_configured ? 'Configured' : 'Credentials Needed'}
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-stone-600 font-medium mb-1">
+                    Easebuzz Environment:
+                  </label>
+                  <select
+                    value={editingSbm1Env}
+                    onChange={(e) => setEditingSbm1Env(e.target.value as 'test' | 'live')}
+                    className="w-full bg-white border border-stone-200 p-2 text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  >
+                    <option value="test">Test Mode (https://testpay.easebuzz.in)</option>
+                    <option value="live">Live / Production Mode (https://pay.easebuzz.in)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-stone-600 font-medium mb-1">
+                    Easebuzz Merchant Key (SBM1_GATEWAY_KEY_ID):
+                  </label>
+                  <input
+                    type="text"
+                    value={editingSbm1Key}
+                    onChange={(e) => setEditingSbm1Key(e.target.value)}
+                    placeholder="e.g. 2P1WJ94Z1J"
+                    className="w-full bg-white border border-stone-200 p-2 font-mono text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  {gatewayConfigs?.['sbm-hotel']?.masked_key_id && (
+                    <span className="text-[10px] text-stone-500 mt-0.5 block">
+                      Current Key: {gatewayConfigs['sbm-hotel'].masked_key_id}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-stone-600 font-medium mb-1">
+                    Easebuzz Merchant Salt (SBM1_GATEWAY_KEY_SECRET):
+                  </label>
+                  <input
+                    type="password"
+                    value={editingSbm1Secret}
+                    onChange={(e) => setEditingSbm1Secret(e.target.value)}
+                    placeholder={
+                      gatewayConfigs?.['sbm-hotel']?.has_secret
+                        ? '•••••••••••••••• (Leave blank to keep current salt)'
+                        : 'Enter Easebuzz Merchant Salt'
+                    }
+                    className="w-full bg-white border border-stone-200 p-2 font-mono text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  <span className="text-[10px] text-stone-500 mt-0.5 block">
+                    Used on server for SHA-512 request hashing and callback reverse-hash verification.
+                  </span>
+                </div>
+
+                <div className="bg-stone-50 border border-stone-200 p-2.5 text-[11px] space-y-1 text-stone-600">
+                  <div className="font-semibold text-stone-700">Official Easebuzz Callback Endpoint:</div>
+                  <div className="font-mono text-stone-800 break-all select-all">
+                    {window.location.origin}/api/payments/easebuzz/callback
+                  </div>
+                  <div className="text-[10px] text-stone-500">
+                    Auto-set in initiateLink payload. Handles reverse SHA-512 verification and booking completion.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={savingGateway === 'sbm1'}
+                  onClick={async () => {
+                    setSavingGateway('sbm1');
+                    setGatewayMsg(null);
+                    try {
+                      const updates: any = {
+                        provider: 'easebuzz',
+                        easebuzz_env: editingSbm1Env,
+                        mode: editingSbm1Env === 'live' ? 'live' : 'test',
+                        key_id: editingSbm1Key.trim()
+                      };
+                      if (editingSbm1Secret.trim()) {
+                        updates.key_secret = editingSbm1Secret.trim();
+                      }
+                      const updated = await api.adminUpdateGatewayConfig('sbm-hotel', updates);
+                      setGatewayConfigs(prev => prev ? { ...prev, 'sbm-hotel': updated } : null);
+                      setEditingSbm1Secret('');
+                      setGatewayMsg({ property: 'sbm1', text: '✓ SBM 1 Easebuzz settings saved successfully!' });
+                      setTimeout(() => setGatewayMsg(null), 4000);
+                    } catch (err: any) {
+                      setGatewayMsg({ property: 'sbm1', text: `❌ Failed to save Easebuzz settings: ${err.message}`, error: true });
+                    } finally {
+                      setSavingGateway(null);
+                    }
+                  }}
+                  className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold px-4 py-2 transition-colors cursor-pointer uppercase text-[10px] tracking-[0.15em] flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <span>{savingGateway === 'sbm1' ? 'Saving Easebuzz...' : 'Save Easebuzz Settings'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* SBM 2 – PhonePe Card */}
+            <div className="bg-[#FDFCFB] border border-purple-200/70 p-4 space-y-3.5 rounded-xs">
+              <div className="flex items-center justify-between border-b border-stone-200 pb-2.5">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-purple-600 text-white flex items-center justify-center text-[10px] font-bold">
+                    2
+                  </div>
+                  <div>
+                    <span className="font-serif font-bold text-sm text-[#1A1A1A]">
+                      SBM 2 &ndash; SBM 2 Guest House (PhonePe)
+                    </span>
+                    <span className="text-[10px] text-stone-500 block">
+                      Assigned Provider: <strong>PhonePe Standard Checkout SDK</strong>
+                    </span>
+                  </div>
+                </div>
+                <span
+                  className={`text-[10px] px-2 py-0.5 font-bold uppercase ${
+                    gatewayConfigs?.['sbm-guest-house']?.is_configured
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      : 'bg-amber-100 text-amber-800 border border-amber-300'
+                  }`}
+                >
+                  {gatewayConfigs?.['sbm-guest-house']?.is_configured ? 'Configured' : 'Credentials Needed'}
+                </span>
+              </div>
+
+              <div className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-stone-600 font-medium mb-1">
+                    PhonePe Environment:
+                  </label>
+                  <select
+                    value={editingSbm2Env}
+                    onChange={(e) => setEditingSbm2Env(e.target.value as 'SANDBOX' | 'PRODUCTION')}
+                    className="w-full bg-white border border-stone-200 p-2 text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  >
+                    <option value="SANDBOX">SANDBOX (Test)</option>
+                    <option value="PRODUCTION">PRODUCTION (Live)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-stone-600 font-medium mb-1">
+                    PhonePe Client / Merchant ID (SBM2_GATEWAY_KEY_ID / SBM2_PHONEPE_CLIENT_ID):
+                  </label>
+                  <input
+                    type="text"
+                    value={editingSbm2Key}
+                    onChange={(e) => setEditingSbm2Key(e.target.value)}
+                    placeholder="e.g. M22K67X4321..."
+                    className="w-full bg-white border border-stone-200 p-2 font-mono text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  {gatewayConfigs?.['sbm-guest-house']?.masked_key_id && (
+                    <span className="text-[10px] text-stone-500 mt-0.5 block">
+                      Current ID: {gatewayConfigs['sbm-guest-house'].masked_key_id}
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block text-stone-600 font-medium mb-1">
+                    PhonePe Client Secret (SBM2_GATEWAY_KEY_SECRET / SBM2_PHONEPE_CLIENT_SECRET):
+                  </label>
+                  <input
+                    type="password"
+                    value={editingSbm2Secret}
+                    onChange={(e) => setEditingSbm2Secret(e.target.value)}
+                    placeholder={
+                      gatewayConfigs?.['sbm-guest-house']?.has_secret
+                        ? '•••••••••••••••• (Leave blank to keep current secret)'
+                        : 'Enter PhonePe Client Secret'
+                    }
+                    className="w-full bg-white border border-stone-200 p-2 font-mono text-[#1A1A1A] focus:outline-none focus:border-[#C5A059]"
+                  />
+                  <span className="text-[10px] text-stone-500 mt-0.5 block">
+                    Used on server for PhonePe token generation and webhook signature verification.
+                  </span>
+                </div>
+
+                <div className="bg-stone-50 border border-stone-200 p-2.5 text-[11px] space-y-1 text-stone-600">
+                  <div className="font-semibold text-stone-700">PhonePe Webhook Endpoint:</div>
+                  <div className="font-mono text-stone-800 break-all select-all">
+                    {window.location.origin}/api/payments/webhook/sbm-guest-house
+                  </div>
+                  <div className="text-[10px] text-stone-500">
+                    Configured in PhonePe Merchant Dashboard for server-to-server transaction updates.
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={savingGateway === 'sbm2'}
+                  onClick={async () => {
+                    setSavingGateway('sbm2');
+                    setGatewayMsg(null);
+                    try {
+                      const updates: any = {
+                        provider: 'phonepe',
+                        phonepe_env: editingSbm2Env,
+                        mode: editingSbm2Env === 'PRODUCTION' ? 'live' : 'test',
+                        key_id: editingSbm2Key.trim(),
+                        merchant_id: editingSbm2Key.trim()
+                      };
+                      if (editingSbm2Secret.trim()) {
+                        updates.key_secret = editingSbm2Secret.trim();
+                      }
+                      const updated = await api.adminUpdateGatewayConfig('sbm-guest-house', updates);
+                      setGatewayConfigs(prev => prev ? { ...prev, 'sbm-guest-house': updated } : null);
+                      setEditingSbm2Secret('');
+                      setGatewayMsg({ property: 'sbm2', text: '✓ SBM 2 PhonePe settings saved successfully!' });
+                      setTimeout(() => setGatewayMsg(null), 4000);
+                    } catch (err: any) {
+                      setGatewayMsg({ property: 'sbm2', text: `❌ Failed to save PhonePe settings: ${err.message}`, error: true });
+                    } finally {
+                      setSavingGateway(null);
+                    }
+                  }}
+                  className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold px-4 py-2 transition-colors cursor-pointer uppercase text-[10px] tracking-[0.15em] flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <span>{savingGateway === 'sbm2' ? 'Saving PhonePe...' : 'Save PhonePe Settings'}</span>
+                </button>
+              </div>
             </div>
           </div>
 

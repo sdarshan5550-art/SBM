@@ -41,7 +41,8 @@ import {
   verifyRazorpayWebhookSignature
 } from './server/razorpay';
 import { paymentGatewayRegistry } from './server/services/payments/paymentGatewayRegistry';
-import { PropertyCode, PaymentTransactionRecord, CombinedBookingGroup } from './src/types';
+import { EasebuzzAdapter } from './server/services/payments/adapters/easebuzzAdapter';
+import { PropertyCode, PaymentTransactionRecord, CombinedBookingGroup, PaymentGatewayProviderType } from './src/types';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'sbm_hotel_salasar_secret_key_2026';
 const PORT = 3000;
@@ -67,8 +68,19 @@ async function startServer() {
   }
 
   const app = express();
-  app.use(express.json({ limit: '10mb' }));
-  app.use(express.urlencoded({ limit: '10mb', extended: true }));
+  app.use(express.json({
+    limit: '10mb',
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    }
+  }));
+  app.use(express.urlencoded({
+    limit: '10mb',
+    extended: true,
+    verify: (req: any, _res, buf) => {
+      req.rawBody = buf.toString('utf8');
+    }
+  }));
 
   app.get('/api/debug/database', (req, res) => {
     try {
@@ -1030,6 +1042,203 @@ async function startServer() {
     }
   });
 
+  // Unified Payment Verification & Finalization Helper
+  interface FinalizeBookingPaymentParams {
+    bookingIdOrNumber?: string;
+    orderId?: string;
+    transactionId?: string;
+    propertyCode: PropertyCode;
+    expectedGateway: PaymentGatewayProviderType;
+    amountInPaise?: number; // Integer paise
+    amountInRupees?: number;
+    currency?: string;
+    status: 'COMPLETED' | 'SUCCESS' | 'FAILED' | 'PENDING';
+    method?: string;
+    signature?: string;
+  }
+
+  interface FinalizeBookingPaymentResult {
+    success: boolean;
+    isDuplicate?: boolean;
+    booking?: any;
+    error?: string;
+    statusCode?: number;
+  }
+
+  const finalizeBookingPayment = (params: FinalizeBookingPaymentParams): FinalizeBookingPaymentResult => {
+    // 1. Booking existence & order match
+    const booking =
+      (params.orderId ? db.getBookingByRazorpayOrderId(params.orderId) : undefined) ||
+      (params.bookingIdOrNumber ? db.getBookingByIdOrNumber(params.bookingIdOrNumber) : undefined);
+
+    if (!booking) {
+      return {
+        success: false,
+        error: `Booking record not found for orderId=${params.orderId || ''}, bookingNumber=${params.bookingIdOrNumber || ''}`,
+        statusCode: 404
+      };
+    }
+
+    // 2. Property ownership check
+    if (booking.property_code !== params.propertyCode) {
+      return {
+        success: false,
+        error: `Property ownership mismatch: Booking ${booking.booking_number} belongs to ${booking.property_code}, but payment arrived for ${params.propertyCode}`,
+        statusCode: 403
+      };
+    }
+
+    // 3. Gateway match check (SBM1 = easebuzz, SBM2 = phonepe)
+    const expectedForProp: PaymentGatewayProviderType = booking.property_code === 'sbm-hotel' ? 'easebuzz' : 'phonepe';
+    if (params.expectedGateway !== expectedForProp) {
+      return {
+        success: false,
+        error: `Gateway mismatch: Property ${booking.property_code} requires ${expectedForProp}, received ${params.expectedGateway}`,
+        statusCode: 400
+      };
+    }
+
+    // 4. Duplicate prevention / Idempotency
+    if ((booking.payment_status === 'Completed' || booking.payment_status === 'Paid') && booking.booking_status === 'Confirmed') {
+      console.log(`[Payment Finalization] Idempotent hit: Booking ${booking.booking_number} is already paid.`);
+      return {
+        success: true,
+        isDuplicate: true,
+        booking
+      };
+    }
+
+    // 5. Status check
+    const isCompleted = params.status === 'COMPLETED' || params.status === 'SUCCESS';
+    if (!isCompleted) {
+      db.updateBooking(booking.id, {
+        payment_status: 'Failed',
+        internal_notes: `Payment unsuccessful with status: ${params.status}. Txn: ${params.transactionId || params.orderId || ''}`
+      });
+      if (params.orderId) {
+        db.updatePaymentTransaction(params.orderId, {
+          status: 'FAILED',
+          error_description: `Payment not completed: ${params.status}`
+        });
+      }
+      return {
+        success: false,
+        error: `Payment status is ${params.status}`,
+        statusCode: 400
+      };
+    }
+
+    // 6. Currency check
+    const curr = (params.currency || 'INR').toUpperCase();
+    if (curr !== 'INR') {
+      return {
+        success: false,
+        error: `Invalid currency: ${curr}. Only INR is supported.`,
+        statusCode: 400
+      };
+    }
+
+    // 7. Exact amount match in paise (normalizing PhonePe paise and Easebuzz rupees to integer paise)
+    const bookingPaise = Math.round(booking.total_amount * 100);
+    let paidPaise: number | undefined = params.amountInPaise;
+    if (paidPaise === undefined && params.amountInRupees !== undefined) {
+      paidPaise = Math.round(params.amountInRupees * 100);
+    }
+
+    if (paidPaise !== undefined) {
+      if (Math.abs(paidPaise - bookingPaise) > 10) {
+        console.error(`[Security Payment Check] Amount mismatch for ${booking.booking_number}: expected ${bookingPaise} paise (₹${booking.total_amount}), received ${paidPaise} paise`);
+        db.updateBooking(booking.id, {
+          payment_status: 'Failed',
+          internal_notes: `Amount mismatch: expected ₹${booking.total_amount} (${bookingPaise} paise), received ${paidPaise} paise.`
+        });
+        return {
+          success: false,
+          error: `Amount mismatch: Expected ₹${booking.total_amount}, got ₹${(paidPaise / 100).toFixed(2)}`,
+          statusCode: 400
+        };
+      }
+    }
+
+    // 8. Finalize payment record
+    const verifiedAt = new Date().toISOString();
+    const effectiveTxnId = params.transactionId || params.orderId || `txn_${Date.now()}`;
+    const effectiveMethod = params.method || (booking.property_code === 'sbm-hotel' ? 'online_easebuzz' : 'online_phonepe');
+
+    const updatedBooking = db.updateBooking(booking.id, {
+      payment_status: 'Completed',
+      booking_status: 'Confirmed',
+      payment_method: effectiveMethod,
+      payment_txn_id: effectiveTxnId,
+      razorpay_order_id: params.orderId || booking.razorpay_order_id,
+      razorpay_payment_id: effectiveTxnId,
+      razorpay_signature: params.signature || booking.razorpay_signature,
+      payment_amount: booking.total_amount,
+      payment_currency: 'INR',
+      payment_verified_at: verifiedAt
+    });
+
+    if (params.orderId) {
+      db.updatePaymentTransaction(params.orderId, {
+        status: 'SUCCESS',
+        transaction_id: effectiveTxnId,
+        signature: params.signature,
+        verified_at: verifiedAt
+      });
+    }
+
+    db.recordPaymentForReservation({
+      reservationId: booking.id,
+      method: effectiveMethod.toUpperCase(),
+      amount: booking.total_amount,
+      transactionId: effectiveTxnId,
+      paymentReference: `${booking.property_name} Payment (${effectiveTxnId})`,
+      recordedBy: `${booking.property_name} Gateway`
+    });
+
+    if (updatedBooking.coupon_code) {
+      const coupon = db.getCouponByCode(updatedBooking.coupon_code);
+      if (coupon) {
+        if (isPostgresAvailable()) {
+          postgresRecordCouponUsage(coupon.id, updatedBooking.id, updatedBooking.guest_email, updatedBooking.guest_phone, updatedBooking.discount_amount || 0).catch(console.error);
+        }
+        db.recordCouponUsage(coupon.id, updatedBooking.id, updatedBooking.guest_email, updatedBooking.guest_phone, updatedBooking.discount_amount || 0);
+      }
+    }
+
+    db.addActivity(
+      'Payment',
+      `₹${booking.total_amount.toLocaleString('en-IN')} paid via ${booking.property_name} gateway by ${booking.guest_name} (${booking.booking_number}). Txn: ${effectiveTxnId}${updatedBooking.coupon_code ? ' [Coupon: ' + updatedBooking.coupon_code + ']' : ''}`,
+      booking.property_code,
+      `${booking.property_name} Gateway`
+    );
+
+    emailService.sendBookingConfirmationEmail(updatedBooking).catch((err: any) => {
+      console.error('[EmailService] Async confirmation email error:', err?.message || err);
+    });
+    emailService.sendAdminBookingNotification(updatedBooking).catch((err: any) => {
+      console.error('[EmailService] Async admin alert error:', err?.message || err);
+    });
+
+    bhashSmsService.sendBookingConfirmation(updatedBooking).then((waRes) => {
+      if (waRes.success) {
+        db.updateBookingWhatsAppStatus(updatedBooking.id, 'sent', waRes.messageId);
+      } else if (waRes.notConfigured) {
+        db.updateBookingWhatsAppStatus(updatedBooking.id, 'not_configured', undefined, waRes.error);
+      } else {
+        db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waRes.error);
+      }
+    }).catch((waErr: any) => {
+      console.error('[WhatsApp] Async confirmation error:', waErr?.message || waErr);
+      db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waErr?.message);
+    });
+
+    return {
+      success: true,
+      booking: updatedBooking
+    };
+  };
+
   // 6. Verify Single Payment Signature (Property-Aware)
   app.post('/api/payments/verify', async (req, res) => {
     try {
@@ -1040,23 +1249,27 @@ async function startServer() {
         razorpay_signature,
         order_id,
         transaction_id,
-        signature
+        signature,
+        raw_payload
       } = req.body;
 
       const effectiveOrderId = razorpay_order_id || order_id;
       const effectiveTxnId = razorpay_payment_id || transaction_id;
       const effectiveSig = razorpay_signature || signature;
 
-      if (!booking_id || !effectiveOrderId || !effectiveTxnId) {
-        return res.status(400).json({ error: 'Missing required payment verification parameters.' });
+      if (!booking_id && !effectiveOrderId) {
+        return res.status(400).json({ error: 'Missing required payment verification parameters (booking_id or order_id).' });
       }
 
-      const booking = db.getBookingByIdOrNumber(booking_id) || db.getBookingByRazorpayOrderId(effectiveOrderId);
+      const booking =
+        (effectiveOrderId ? db.getBookingByRazorpayOrderId(effectiveOrderId) : undefined) ||
+        (booking_id ? db.getBookingByIdOrNumber(booking_id) : undefined);
+
       if (!booking) {
         return res.status(404).json({ error: 'Associated booking record was not found.' });
       }
 
-      // Duplicate payment protection / Idempotency
+      // Check if already paid (idempotent fast path)
       if ((booking.payment_status === 'Completed' || booking.payment_status === 'Paid') && booking.booking_status === 'Confirmed') {
         return res.json({
           success: true,
@@ -1069,106 +1282,63 @@ async function startServer() {
       const verification = await paymentGatewayRegistry.verifyPaymentForProperty(
         booking.property_code,
         {
-          order_id: effectiveOrderId,
-          transaction_id: effectiveTxnId,
+          order_id: effectiveOrderId || booking.razorpay_order_id || '',
+          transaction_id: effectiveTxnId || effectiveOrderId || '',
           signature: effectiveSig,
-          property_code: booking.property_code
+          property_code: booking.property_code,
+          raw_payload: raw_payload || req.body
         }
       );
 
       if (!verification.isValid) {
         db.updateBooking(booking.id, {
           payment_status: 'Failed',
-          internal_notes: `Payment signature mismatch. Order: ${effectiveOrderId}, Payment: ${effectiveTxnId}`
+          internal_notes: `Payment verification failed. Order: ${effectiveOrderId}, Payment: ${effectiveTxnId}`
         });
-        db.updatePaymentTransaction(effectiveOrderId, {
-          status: 'FAILED',
-          error_description: verification.error || 'Signature check failed'
-        });
+        if (effectiveOrderId) {
+          db.updatePaymentTransaction(effectiveOrderId, {
+            status: 'FAILED',
+            error_description: verification.error || 'Verification check failed'
+          });
+        }
         return res.status(400).json({
           success: false,
           error: `${booking.property_name} payment verification failed: ${verification.error || 'The transaction could not be authenticated.'}`
         });
       }
 
-      // Mark booking as PAID and CONFIRMED
-      const verifiedAt = new Date().toISOString();
-      const updatedBooking = db.updateBooking(booking.id, {
-        payment_status: 'Completed',
-        booking_status: 'Confirmed',
-        payment_method: verification.method || booking.payment_method || 'online_payment',
-        payment_txn_id: effectiveTxnId,
-        razorpay_order_id: effectiveOrderId,
-        razorpay_payment_id: effectiveTxnId,
-        razorpay_signature: effectiveSig,
-        payment_amount: booking.total_amount,
-        payment_currency: 'INR',
-        payment_verified_at: verifiedAt
-      });
-
-      // Update Transaction Record
-      db.updatePaymentTransaction(effectiveOrderId, {
-        status: 'SUCCESS',
-        transaction_id: effectiveTxnId,
-        signature: effectiveSig,
-        verified_at: verifiedAt
-      });
-
-      // Record in PMS Ledger
-      db.recordPaymentForReservation({
-        reservationId: booking.id,
-        method: verification.method || booking.payment_method || 'ONLINE',
-        amount: booking.total_amount,
-        transactionId: effectiveTxnId,
-        paymentReference: `${booking.property_name} Payment (${effectiveTxnId})`,
-        recordedBy: `${booking.property_name} Gateway`
-      });
-
-      // Record Coupon Usage if coupon was applied
-      if (updatedBooking.coupon_code) {
-        const coupon = db.getCouponByCode(updatedBooking.coupon_code);
-        if (coupon) {
-          if (isPostgresAvailable()) {
-            postgresRecordCouponUsage(coupon.id, updatedBooking.id, updatedBooking.guest_email, updatedBooking.guest_phone, updatedBooking.discount_amount || 0).catch(console.error);
-          }
-          db.recordCouponUsage(coupon.id, updatedBooking.id, updatedBooking.guest_email, updatedBooking.guest_phone, updatedBooking.discount_amount || 0);
-        }
+      // Normalize amount to paise
+      let amountInPaise: number | undefined;
+      if (typeof verification.amount === 'number') {
+        amountInPaise = Math.round(verification.amount * 100);
       }
 
-      // Front desk activity log
-      db.addActivity(
-        'Payment',
-        `₹${booking.total_amount.toLocaleString('en-IN')} paid via ${booking.property_name} gateway by ${booking.guest_name} (${booking.booking_number}). Txn: ${effectiveTxnId}${updatedBooking.coupon_code ? ' [Coupon: ' + updatedBooking.coupon_code + ']' : ''}`,
-        booking.property_code,
-        `${booking.property_name} Gateway`
-      );
-
-      // Asynchronously trigger customer confirmation & admin alert
-      emailService.sendBookingConfirmationEmail(updatedBooking).catch((err: any) => {
-        console.error('[EmailService] Async confirmation email error:', err?.message || err);
-      });
-      emailService.sendAdminBookingNotification(updatedBooking).catch((err: any) => {
-        console.error('[EmailService] Async admin alert error:', err?.message || err);
+      const finalizeResult = finalizeBookingPayment({
+        bookingIdOrNumber: booking.id,
+        orderId: effectiveOrderId || booking.razorpay_order_id,
+        transactionId: verification.transaction_id || effectiveTxnId,
+        propertyCode: booking.property_code,
+        expectedGateway: booking.property_code === 'sbm-hotel' ? 'easebuzz' : 'phonepe',
+        amountInPaise,
+        currency: verification.currency || 'INR',
+        status: verification.status === 'SUCCESS' ? 'COMPLETED' : 'FAILED',
+        method: verification.method,
+        signature: effectiveSig
       });
 
-      // WhatsApp booking confirmation via BhashSMS
-      bhashSmsService.sendBookingConfirmation(updatedBooking).then((waRes) => {
-        if (waRes.success) {
-          db.updateBookingWhatsAppStatus(updatedBooking.id, 'sent', waRes.messageId);
-        } else if (waRes.notConfigured) {
-          db.updateBookingWhatsAppStatus(updatedBooking.id, 'not_configured', undefined, waRes.error);
-        } else {
-          db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waRes.error);
-        }
-      }).catch((waErr: any) => {
-        console.error('[WhatsApp] Async confirmation error:', waErr?.message || waErr);
-        db.updateBookingWhatsAppStatus(updatedBooking.id, 'failed', undefined, waErr?.message);
-      });
+      if (!finalizeResult.success) {
+        return res.status(finalizeResult.statusCode || 400).json({
+          success: false,
+          error: finalizeResult.error
+        });
+      }
 
-      res.json({
+      return res.json({
         success: true,
-        message: 'Payment successfully verified and booking confirmed.',
-        booking: updatedBooking
+        message: finalizeResult.isDuplicate
+          ? 'Booking is already confirmed and paid.'
+          : `Payment successfully verified and booking confirmed via ${booking.property_name} gateway.`,
+        booking: finalizeResult.booking
       });
     } catch (err: any) {
       console.error('Payment Verification Error:', err);
@@ -1217,6 +1387,95 @@ async function startServer() {
     }
   });
 
+  // Dedicated Easebuzz Hosted Checkout Callback Handler (SBM1 - SBM Hotel)
+  const handleEasebuzzCallback = async (req: express.Request, res: express.Response) => {
+    try {
+      const data = { ...req.body, ...req.query };
+      const {
+        txnid,
+        status,
+        amount,
+        easepayid,
+        hash,
+        udf1, // booking_number
+        udf2, // property_code
+        error_Message
+      } = data;
+
+      console.log(`[Easebuzz Callback] Received callback for txnid=${txnid}, status=${status}, amount=₹${amount}, easepayid=${easepayid}`);
+
+      const appUrl = process.env.APP_URL || 'https://sbmhotel.com';
+
+      // 1. Locate Booking via order txnid or booking number (udf1)
+      const bookingNumber = udf1;
+      const booking = (txnid ? db.getBookingByRazorpayOrderId(txnid) : undefined) ||
+                      (bookingNumber ? db.getBookingByIdOrNumber(bookingNumber) : undefined);
+
+      if (!booking) {
+        console.error(`[Easebuzz Callback] Booking not found for txnid=${txnid}, booking_number=${bookingNumber}`);
+        return res.redirect(`${appUrl}/manage-booking?error=Booking+not+found`);
+      }
+
+      // 2. Strict property check: Easebuzz is exclusively for SBM Hotel (sbm-hotel)
+      if (booking.property_code !== 'sbm-hotel') {
+        console.error(`[Easebuzz Callback Security] Property mismatch: Booking ${booking.booking_number} belongs to ${booking.property_code}, not sbm-hotel!`);
+        return res.redirect(`${appUrl}/manage-booking?booking_number=${booking.booking_number}&payment_status=failed&error=Property+mismatch`);
+      }
+
+      // 3. Verify response hash with SBM1 Merchant Salt
+      const sbm1Config = paymentGatewayRegistry.getPropertyConfig('sbm-hotel');
+      const adapter = paymentGatewayRegistry.getAdapter('easebuzz') as EasebuzzAdapter;
+      const isHashValid = adapter.verifyResponseHash(data, sbm1Config.key_secret || '');
+
+      if (!isHashValid) {
+        console.error(`[Easebuzz Callback Security] Cryptographic response hash mismatch for txnid=${txnid}`);
+        db.updateBooking(booking.id, {
+          payment_status: 'Failed',
+          internal_notes: `Easebuzz callback hash mismatch. Txn: ${txnid}`
+        });
+        if (txnid) {
+          db.updatePaymentTransaction(txnid, {
+            status: 'FAILED',
+            error_description: 'Callback signature hash mismatch'
+          });
+        }
+        return res.redirect(`${appUrl}/manage-booking?booking_number=${booking.booking_number}&payment_status=failed&error=Invalid+hash`);
+      }
+
+      const isSuccess = (status || '').toLowerCase() === 'success';
+      const parsedAmount = amount ? parseFloat(amount) : undefined;
+      const amountInPaise = parsedAmount !== undefined ? Math.round(parsedAmount * 100) : undefined;
+
+      // 4. Finalize payment using unified helper
+      const finalizeResult = finalizeBookingPayment({
+        bookingIdOrNumber: booking.id,
+        orderId: txnid,
+        transactionId: easepayid || txnid,
+        propertyCode: 'sbm-hotel',
+        expectedGateway: 'easebuzz',
+        amountInPaise,
+        currency: 'INR',
+        status: isSuccess ? 'COMPLETED' : 'FAILED',
+        method: 'online_easebuzz',
+        signature: hash
+      });
+
+      if (!finalizeResult.success && !finalizeResult.isDuplicate) {
+        console.error(`[Easebuzz Callback Finalize Error] ${finalizeResult.error}`);
+        return res.redirect(`${appUrl}/manage-booking?booking_number=${booking.booking_number}&payment_status=failed&error=${encodeURIComponent(finalizeResult.error || 'Payment failed')}`);
+      }
+
+      return res.redirect(`${appUrl}/manage-booking?booking_number=${booking.booking_number}&payment_status=success`);
+    } catch (err: any) {
+      console.error('[Easebuzz Callback Exception]', err);
+      const appUrl = process.env.APP_URL || 'https://sbmhotel.com';
+      return res.redirect(`${appUrl}/manage-booking?payment_status=error&error=${encodeURIComponent(err.message || 'Processing error')}`);
+    }
+  };
+
+  app.post('/api/payments/easebuzz/callback', handleEasebuzzCallback);
+  app.get('/api/payments/easebuzz/callback', handleEasebuzzCallback);
+
   // 8. Dedicated Property Webhook Handlers
   app.post('/api/payments/webhook/:property_code', async (req, res) => {
     try {
@@ -1225,52 +1484,58 @@ async function startServer() {
         return res.status(400).json({ error: 'Invalid property code in webhook route.' });
       }
 
-      const signature =
-        (req.headers['x-razorpay-signature'] as string) ||
-        (req.headers['x-verify'] as string) ||
-        (req.headers['x-webhook-signature'] as string) ||
-        (req.headers['stripe-signature'] as string) ||
+      const authHeader =
+        (req.headers['authorization'] as string) ||
+        (req.headers['Authorization'] as string) ||
         '';
 
-      const rawBody = JSON.stringify(req.body);
-      const verifyRes = await paymentGatewayRegistry.handleWebhook(propertyCode, rawBody, signature);
+      const signature =
+        (req.headers['x-verify'] as string) ||
+        (req.headers['x-razorpay-signature'] as string) ||
+        (req.headers['x-webhook-signature'] as string) ||
+        (req.headers['stripe-signature'] as string) ||
+        authHeader ||
+        '';
+
+      const rawBodyString =
+        (req as any).rawBody ||
+        (typeof req.body === 'string' ? req.body : JSON.stringify(req.body));
+
+      const verifyRes = await paymentGatewayRegistry.handleWebhook(
+        propertyCode,
+        rawBodyString,
+        signature,
+        {
+          authorizationHeader: authHeader,
+          headers: req.headers,
+          rawBodyString
+        }
+      );
 
       if (!verifyRes.isValid) {
         console.warn(`[Webhook - ${propertyCode}] Webhook verification rejected:`, verifyRes.error);
         return res.status(400).json({ error: verifyRes.error || 'Webhook verification failed.' });
       }
 
-      // Idempotent state transitions
+      // Idempotent state transitions using unified helper
       if (verifyRes.order_id) {
-        const booking = db.getBookingByRazorpayOrderId(verifyRes.order_id);
-        if (booking && booking.property_code === propertyCode) {
-          if (verifyRes.status === 'SUCCESS' && booking.payment_status !== 'Completed' && booking.payment_status !== 'Paid') {
-            const updatedBooking = db.updateBooking(booking.id, {
-              payment_status: 'Completed',
-              booking_status: 'Confirmed',
-              payment_txn_id: verifyRes.transaction_id,
-              payment_verified_at: new Date().toISOString()
-            });
+        const expectedGateway = propertyCode === 'sbm-hotel' ? 'easebuzz' : 'phonepe';
+        const amountInPaise = typeof verifyRes.amount === 'number' ? Math.round(verifyRes.amount * 100) : undefined;
 
-            db.updatePaymentTransaction(verifyRes.order_id, {
-              status: 'SUCCESS',
-              transaction_id: verifyRes.transaction_id,
-              verified_at: new Date().toISOString()
-            });
+        const finalizeResult = finalizeBookingPayment({
+          orderId: verifyRes.order_id,
+          transactionId: verifyRes.transaction_id,
+          propertyCode,
+          expectedGateway,
+          amountInPaise,
+          currency: verifyRes.currency || 'INR',
+          status: verifyRes.status === 'SUCCESS' ? 'COMPLETED' : 'FAILED',
+          method: propertyCode === 'sbm-hotel' ? 'online_easebuzz' : 'online_phonepe'
+        });
 
-            db.addActivity(
-              'Payment',
-              `Webhook Confirmation: ₹${booking.total_amount} captured for ${booking.booking_number} (Txn: ${verifyRes.transaction_id})`,
-              booking.property_code,
-              `${booking.property_name} Webhook`
-            );
-
-            emailService.sendBookingConfirmationEmail(updatedBooking).catch(console.error);
-            emailService.sendAdminBookingNotification(updatedBooking).catch(console.error);
-            bhashSmsService.sendBookingConfirmation(updatedBooking).catch(console.error);
-          } else if (verifyRes.status === 'FAILED') {
-            db.updatePaymentTransaction(verifyRes.order_id, { status: 'FAILED' });
-          }
+        if (!finalizeResult.success && !finalizeResult.isDuplicate) {
+          console.warn(`[Webhook - ${propertyCode}] Finalize failed:`, finalizeResult.error);
+          return res.status(finalizeResult.statusCode || 400).json({ error: finalizeResult.error });
         }
       }
 
@@ -2533,7 +2798,9 @@ res.json({
         webhook_secret,
         bank_account_name,
         settlement_account_number,
-        mode
+        mode,
+        easebuzz_env,
+        phonepe_env
       } = req.body;
 
       const updates: any = {};
@@ -2545,6 +2812,8 @@ res.json({
       if (bank_account_name !== undefined) updates.bank_account_name = bank_account_name.trim();
       if (settlement_account_number !== undefined) updates.settlement_account_number = settlement_account_number.trim();
       if (mode) updates.mode = mode;
+      if (easebuzz_env) updates.easebuzz_env = easebuzz_env;
+      if (phonepe_env) updates.phonepe_env = phonepe_env;
 
       paymentGatewayRegistry.updatePropertyConfig(propertyCode, updates);
       res.json(paymentGatewayRegistry.getPublicPropertyConfig(propertyCode));

@@ -12,8 +12,9 @@ import {
   RefundParams,
   RefundResult
 } from './types';
-import { RazorpayAdapter } from './adapters/razorpayAdapter';
+import { EasebuzzAdapter } from './adapters/easebuzzAdapter';
 import { PhonePeAdapter } from './adapters/phonepeAdapter';
+import { RazorpayAdapter } from './adapters/razorpayAdapter';
 import { CashfreeAdapter } from './adapters/cashfreeAdapter';
 import { StripeAdapter } from './adapters/stripeAdapter';
 import { db } from '../../db';
@@ -23,33 +24,31 @@ export function sanitizeEnv(val: string | undefined | null): string {
   return val.trim().replace(/^["']|["']$/g, '').trim();
 }
 
-function normalizeProvider(raw: string | undefined): PaymentGatewayProviderType {
-  if (!raw) return 'phonepe';
+/**
+ * Normalizes provider string safely without collapsing Razorpay into PhonePe or vice-versa.
+ * If raw is unset, falls back strictly to the specified default provider for that property.
+ */
+export function normalizeProvider(
+  raw: string | undefined,
+  defaultProvider: PaymentGatewayProviderType
+): PaymentGatewayProviderType {
+  if (!raw) return defaultProvider;
   const lower = raw.toLowerCase().trim();
-  if (lower.includes('phonepe')) return 'phonepe';
-  if (lower.includes('razorpay')) return 'phonepe';
-  if (lower.includes('cashfree')) return 'cashfree';
-  if (lower.includes('stripe')) return 'stripe';
-  if (['phonepe', 'razorpay', 'cashfree', 'stripe'].includes(lower)) {
-    return lower === 'razorpay' ? 'phonepe' : (lower as PaymentGatewayProviderType);
-  }
-  return 'phonepe';
+  if (lower === 'easebuzz' || lower.includes('easebuzz')) return 'easebuzz';
+  if (lower === 'phonepe' || lower.includes('phonepe')) return 'phonepe';
+  if (lower === 'razorpay' || lower.includes('razorpay')) return 'razorpay';
+  if (lower === 'cashfree' || lower.includes('cashfree')) return 'cashfree';
+  if (lower === 'stripe' || lower.includes('stripe')) return 'stripe';
+  return defaultProvider;
 }
-
-// Default Test Credentials for sandbox demonstration
-const SBM1_DEFAULT_KEY_ID = 'SU2610151733000347017432';
-const SBM1_DEFAULT_KEY_SECRET = 'b33f84d94d894e629dbf67b5e4c698d9';
-
-// SBM 2 has its own secondary test credentials / separate account representation
-const SBM2_DEFAULT_KEY_ID = 'rzp_test_SBM2GuestHouseKey';
-const SBM2_DEFAULT_KEY_SECRET = 'sbm2SecretKeyLiveDev992';
 
 export class PaymentGatewayRegistry {
   private adapters: Map<PaymentGatewayProviderType, IPaymentGatewayAdapter> = new Map();
 
   constructor() {
-    this.registerAdapter(new RazorpayAdapter());
+    this.registerAdapter(new EasebuzzAdapter());
     this.registerAdapter(new PhonePeAdapter());
+    this.registerAdapter(new RazorpayAdapter());
     this.registerAdapter(new CashfreeAdapter());
     this.registerAdapter(new StripeAdapter());
   }
@@ -75,10 +74,15 @@ export class PaymentGatewayRegistry {
   }
 
   /**
-   * Retrieves server-side configuration for a property, merging:
+   * Retrieves server-side configuration for a property:
+   * SBM1 (SBM Hotel) -> Easebuzz (Standard Hosted Checkout)
+   * SBM2 (SBM 2 Guest House) -> PhonePe (Standard Checkout SDK)
+   *
+   * Merging:
    * 1. Environment variables (highest priority for secrets)
    * 2. Database persisted gateway configurations
-   * 3. Fallbacks to ensure backwards compatibility with existing variables
+   *
+   * No hardcoded default credentials or fake settlement account numbers are used.
    */
   public getPropertyConfig(propertyCode: string): PropertyGatewayConfig {
     const normalizedCode = this.normalizePropertyCode(propertyCode);
@@ -90,73 +94,60 @@ export class PaymentGatewayRegistry {
     const dbConfig = dbConfigs[normalizedCode] || {};
 
     if (isSBM1) {
-      // SBM 1: SBM Hotel (Primary Property)
-      const provider: PaymentGatewayProviderType = normalizeProvider(
-        sanitizeEnv(process.env.SBM1_PAYMENT_GATEWAY_PROVIDER) ||
-        dbConfig.provider
-      );
+      // SBM 1: SBM Hotel -> EASEBUZZ Hosted Checkout ONLY
+      const provider: PaymentGatewayProviderType = 'easebuzz';
 
-      let keyId =
+      // Easebuzz Merchant Key
+      const keyId =
         sanitizeEnv(process.env.SBM1_GATEWAY_KEY_ID) ||
-        sanitizeEnv(process.env.SBM1_PHONEPE_KEY_ID) ||
-        sanitizeEnv(process.env.SBM1_PHONEPE_CLIENT_ID) ||
-        sanitizeEnv(process.env.SBM1_RAZORPAY_KEY_ID) ||
+        sanitizeEnv(process.env.SBM1_EASEBUZZ_KEY) ||
         dbConfig.key_id ||
-        sanitizeEnv(process.env.RAZORPAY_KEY_ID) ||
-        SBM1_DEFAULT_KEY_ID;
+        '';
 
-      let keySecret =
+      // Easebuzz Merchant Salt
+      const keySecret =
         sanitizeEnv(process.env.SBM1_GATEWAY_KEY_SECRET) ||
-        sanitizeEnv(process.env.SBM1_PHONEPE_KEY_SECRET) ||
-        sanitizeEnv(process.env.SBM1_PHONEPE_CLIENT_SECRET) ||
-        sanitizeEnv(process.env.SBM1_RAZORPAY_KEY_SECRET) ||
+        sanitizeEnv(process.env.SBM1_EASEBUZZ_SALT) ||
         dbConfig.key_secret ||
-        sanitizeEnv(process.env.RAZORPAY_KEY_SECRET) ||
-        SBM1_DEFAULT_KEY_SECRET;
+        '';
 
-      let webhookSecret =
+      const easebuzzEnvRaw = (
+        sanitizeEnv(process.env.SBM1_EASEBUZZ_ENV) ||
+        dbConfig.easebuzz_env ||
+        'live'
+      ).toLowerCase();
+      const easebuzzEnv: 'test' | 'prod' | 'live' =
+        easebuzzEnvRaw === 'test' ? 'test' : 'live';
+
+      const webhookSecret =
         sanitizeEnv(process.env.SBM1_GATEWAY_WEBHOOK_SECRET) ||
-        sanitizeEnv(process.env.SBM1_RAZORPAY_WEBHOOK_SECRET) ||
         dbConfig.webhook_secret ||
-        sanitizeEnv(process.env.RAZORPAY_WEBHOOK_SECRET) ||
         '';
 
       const merchantId =
         sanitizeEnv(process.env.SBM1_MERCHANT_ID) ||
-        sanitizeEnv(process.env.SBM1_PHONEPE_MERCHANT_ID) ||
         dbConfig.merchant_id ||
-        'SBM_HOTEL_1_MERCHANT';
+        keyId ||
+        'sbm-hotel-merchant';
 
       const bankAccountName =
         sanitizeEnv(process.env.SBM1_BANK_ACCOUNT_NAME) ||
         dbConfig.bank_account_name ||
-        'SBM Hotel Salasar Current A/C (HDFC Bank)';
+        'SBM Hotel Salasar Current A/C';
 
       const settlementAccountNumber =
         sanitizeEnv(process.env.SBM1_SETTLEMENT_ACCOUNT_NUMBER) ||
         dbConfig.settlement_account_number ||
-        '50200084920101';
-
-      const phonepeEnv = (
-        sanitizeEnv(process.env.SBM1_PHONEPE_ENV) ||
-        sanitizeEnv(process.env.PHONEPE_ENV) ||
-        dbConfig.phonepe_env ||
-        (keyId === SBM1_DEFAULT_KEY_ID ? 'SANDBOX' : (keyId.startsWith('SU') || merchantId.startsWith('M') ? 'PRODUCTION' : 'SANDBOX'))
-      ).toUpperCase() as 'SANDBOX' | 'PRODUCTION';
+        '';
 
       const isConfigured = Boolean(keyId && keySecret);
-      let mode: 'test' | 'live' | 'unconfigured' = 'unconfigured';
-      if (keyId === SBM1_DEFAULT_KEY_ID || keyId.startsWith('rzp_test_') || keyId.startsWith('test_') || keyId.includes('sandbox')) {
-        mode = 'test';
-      } else if (keyId.startsWith('rzp_live_') || keyId.startsWith('live_') || keyId.startsWith('pk_live_') || keyId.startsWith('SU') || merchantId.startsWith('M') || phonepeEnv === 'PRODUCTION') {
-        mode = 'live';
-      } else if (isConfigured) {
-        mode = 'test';
-      }
+      const mode: 'test' | 'live' | 'unconfigured' = isConfigured
+        ? (easebuzzEnv === 'live' ? 'live' : 'test')
+        : 'unconfigured';
 
       const maskedKeyId = keyId && keyId.length > 8
-        ? `${keyId.substring(0, 8)}...${keyId.substring(keyId.length - 4)}`
-        : (keyId || 'NOT SET');
+        ? `${keyId.substring(0, 6)}...${keyId.substring(keyId.length - 4)}`
+        : (keyId || 'NOT CONFIGURED');
 
       return {
         property_code: 'sbm-hotel',
@@ -172,81 +163,90 @@ export class PaymentGatewayRegistry {
         client_id: keyId,
         client_secret: keySecret,
         client_version: 1,
-        phonepe_env: (phonepeEnv === 'PRODUCTION' && keyId !== SBM1_DEFAULT_KEY_ID) ? 'PRODUCTION' : 'SANDBOX',
+        easebuzz_env: easebuzzEnv,
         webhook_secret: webhookSecret,
-        webhook_url: `${appUrl}/api/payments/webhook/sbm-hotel`,
+        webhook_url: `${appUrl}/api/payments/easebuzz/callback`,
         masked_key_id: maskedKeyId,
         has_secret: Boolean(keySecret),
         has_webhook_secret: Boolean(webhookSecret)
       };
     } else {
-      // SBM 2: SBM Guest House (Secondary Property)
-      const provider: PaymentGatewayProviderType = normalizeProvider(
-        sanitizeEnv(process.env.SBM2_PAYMENT_GATEWAY_PROVIDER) ||
-        dbConfig.provider
-      );
+      // SBM 2: SBM Guest House -> PHONEPE Standard Checkout ONLY
+      const provider: PaymentGatewayProviderType = 'phonepe';
 
-      let keyId =
+      // PhonePe Client ID / Key ID
+      const keyId =
         sanitizeEnv(process.env.SBM2_GATEWAY_KEY_ID) ||
-        sanitizeEnv(process.env.SBM2_PHONEPE_KEY_ID) ||
         sanitizeEnv(process.env.SBM2_PHONEPE_CLIENT_ID) ||
-        sanitizeEnv(process.env.SBM2_RAZORPAY_KEY_ID) ||
-        sanitizeEnv(process.env.SBM2_CASHFREE_KEY_ID) ||
+        sanitizeEnv(process.env.SBM2_PHONEPE_KEY_ID) ||
         dbConfig.key_id ||
-        SBM2_DEFAULT_KEY_ID;
+        '';
 
-      let keySecret =
+      // PhonePe Client Secret / Key Secret
+      const keySecret =
         sanitizeEnv(process.env.SBM2_GATEWAY_KEY_SECRET) ||
-        sanitizeEnv(process.env.SBM2_PHONEPE_KEY_SECRET) ||
         sanitizeEnv(process.env.SBM2_PHONEPE_CLIENT_SECRET) ||
-        sanitizeEnv(process.env.SBM2_RAZORPAY_KEY_SECRET) ||
-        sanitizeEnv(process.env.SBM2_CASHFREE_KEY_SECRET) ||
+        sanitizeEnv(process.env.SBM2_PHONEPE_KEY_SECRET) ||
         dbConfig.key_secret ||
-        SBM2_DEFAULT_KEY_SECRET;
+        '';
 
-      let webhookSecret =
+      const webhookSecret =
         sanitizeEnv(process.env.SBM2_GATEWAY_WEBHOOK_SECRET) ||
-        sanitizeEnv(process.env.SBM2_RAZORPAY_WEBHOOK_SECRET) ||
         dbConfig.webhook_secret ||
         '';
+
+      const webhookUsername =
+        sanitizeEnv(process.env.SBM2_PHONEPE_WEBHOOK_USERNAME) ||
+        dbConfig.webhook_username ||
+        '';
+
+      const webhookPassword =
+        sanitizeEnv(process.env.SBM2_PHONEPE_WEBHOOK_PASSWORD) ||
+        dbConfig.webhook_password ||
+        '';
+
+      const clientVersionRaw =
+        sanitizeEnv(process.env.SBM2_PHONEPE_CLIENT_VERSION) ||
+        (dbConfig.client_version ? String(dbConfig.client_version) : '1');
+      const clientVersion = parseInt(clientVersionRaw, 10) || 1;
 
       const merchantId =
         sanitizeEnv(process.env.SBM2_MERCHANT_ID) ||
         sanitizeEnv(process.env.SBM2_PHONEPE_MERCHANT_ID) ||
         dbConfig.merchant_id ||
-        'SBM_GUEST_HOUSE_2_MERCHANT';
+        keyId ||
+        'sbm-guest-house-merchant';
 
       const bankAccountName =
         sanitizeEnv(process.env.SBM2_BANK_ACCOUNT_NAME) ||
         dbConfig.bank_account_name ||
-        'SBM 2 Guest House Current A/C (ICICI Bank)';
+        'SBM 2 Guest House Current A/C';
 
       const settlementAccountNumber =
         sanitizeEnv(process.env.SBM2_SETTLEMENT_ACCOUNT_NUMBER) ||
         dbConfig.settlement_account_number ||
-        '10480500938472';
+        '';
 
-      const explicitPhonepeEnv = sanitizeEnv(process.env.SBM2_PHONEPE_ENV) || sanitizeEnv(process.env.PHONEPE_ENV);
-      const isProductionCredentials = keyId.startsWith('SU') || merchantId.startsWith('M');
+      const explicitPhonepeEnv =
+        sanitizeEnv(process.env.SBM2_PHONEPE_ENV) ||
+        sanitizeEnv(process.env.PHONEPE_ENV);
+
       const phonepeEnv: 'SANDBOX' | 'PRODUCTION' = (
         explicitPhonepeEnv
-          ? explicitPhonepeEnv.toUpperCase()
-          : (dbConfig.phonepe_env ? dbConfig.phonepe_env.toUpperCase() : (isProductionCredentials ? 'PRODUCTION' : 'SANDBOX'))
-      ) as 'SANDBOX' | 'PRODUCTION';
+          ? (explicitPhonepeEnv.toUpperCase() === 'SANDBOX' ? 'SANDBOX' : 'PRODUCTION')
+          : (dbConfig.phonepe_env
+              ? (dbConfig.phonepe_env.toUpperCase() === 'SANDBOX' ? 'SANDBOX' : 'PRODUCTION')
+              : 'PRODUCTION')
+      );
 
       const isConfigured = Boolean(keyId && keySecret);
-      let mode: 'test' | 'live' | 'unconfigured' = 'unconfigured';
-      if (keyId.startsWith('rzp_test_') || keyId.startsWith('test_') || keyId.includes('sandbox')) {
-        mode = 'test';
-      } else if (keyId.startsWith('rzp_live_') || keyId.startsWith('live_') || keyId.startsWith('pk_live_') || isProductionCredentials || phonepeEnv === 'PRODUCTION') {
-        mode = 'live';
-      } else if (isConfigured) {
-        mode = 'test';
-      }
+      const mode: 'test' | 'live' | 'unconfigured' = isConfigured
+        ? (phonepeEnv === 'PRODUCTION' ? 'live' : 'test')
+        : 'unconfigured';
 
       const maskedKeyId = keyId && keyId.length > 8
-        ? `${keyId.substring(0, 8)}...${keyId.substring(keyId.length - 4)}`
-        : (keyId || 'NOT SET');
+        ? `${keyId.substring(0, 6)}...${keyId.substring(keyId.length - 4)}`
+        : (keyId || 'NOT CONFIGURED');
 
       return {
         property_code: 'sbm-guest-house',
@@ -261,9 +261,11 @@ export class PaymentGatewayRegistry {
         key_secret: keySecret,
         client_id: keyId,
         client_secret: keySecret,
-        client_version: 1,
-        phonepe_env: (phonepeEnv === 'PRODUCTION' || mode === 'live') ? 'PRODUCTION' : 'SANDBOX',
+        client_version: clientVersion,
+        phonepe_env: phonepeEnv,
         webhook_secret: webhookSecret,
+        webhook_username: webhookUsername,
+        webhook_password: webhookPassword,
         webhook_url: `${appUrl}/api/payments/webhook/sbm-guest-house`,
         masked_key_id: maskedKeyId,
         has_secret: Boolean(keySecret),
@@ -334,13 +336,21 @@ export class PaymentGatewayRegistry {
   public async handleWebhook(
     propertyCode: PropertyCode,
     rawBody: string,
-    signatureHeader: string
+    signatureHeader: string,
+    options?: {
+      authorizationHeader?: string;
+      headers?: Record<string, string | string[] | undefined>;
+      rawBodyString?: string;
+    }
   ): Promise<WebhookVerifyResult> {
     const config = this.getPropertyConfig(propertyCode);
     const adapter = this.getAdapter(config.provider);
     return adapter.verifyWebhook(config, {
       rawBody,
+      rawBodyString: options?.rawBodyString || rawBody,
       signatureHeader,
+      authorizationHeader: options?.authorizationHeader,
+      headers: options?.headers,
       property_code: propertyCode
     });
   }
@@ -364,11 +374,10 @@ export class PaymentGatewayRegistry {
       const cfg = this.getPropertyConfig(code);
       console.log(` • Property:         ${cfg.property_name} (${cfg.property_code})`);
       console.log(`   Provider:         ${cfg.provider.toUpperCase()} (Mode: ${cfg.mode.toUpperCase()})`);
-      console.log(`   Merchant ID:      ${cfg.merchant_id}`);
-      console.log(`   Settlement A/C:   ${cfg.bank_account_name}`);
+      console.log(`   Configured:       ${cfg.is_configured ? 'YES' : 'NO'}`);
       console.log(`   Public Key:       ${cfg.masked_key_id}`);
       console.log(`   Secret Status:    ${cfg.has_secret ? 'PRESENT' : 'MISSING'}`);
-      console.log(`   Webhook URL:      ${cfg.webhook_url}`);
+      console.log(`   Webhook/Callback: ${cfg.webhook_url}`);
     }
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   }

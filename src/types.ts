@@ -225,7 +225,7 @@ export interface Booking {
   bank_account_name?: string;
 }
 
-export type PaymentGatewayProviderType = 'razorpay' | 'phonepe' | 'cashfree' | 'stripe';
+export type PaymentGatewayProviderType = 'easebuzz' | 'phonepe' | 'razorpay' | 'cashfree' | 'stripe';
 
 export interface PropertyGatewayConfig {
   property_code: PropertyCode;
@@ -236,6 +236,8 @@ export interface PropertyGatewayConfig {
   settlement_account_number: string;
   is_configured: boolean;
   mode: 'test' | 'live' | 'unconfigured';
+  phonepe_env?: 'SANDBOX' | 'PRODUCTION';
+  easebuzz_env?: 'test' | 'prod' | 'live';
   key_id: string;
   key_secret?: string;
   webhook_secret?: string;

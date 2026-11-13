@@ -31,7 +31,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   const [emailTouched, setEmailTouched] = useState(false);
   const [specialRequest, setSpecialRequest] = useState('');
   const [agreedTerms, setAgreedTerms] = useState(true);
-  const [paymentMethod, setPaymentMethod] = useState<'online_phonepe' | 'pay_at_hotel'>('online_phonepe');
+  const [paymentMethod, setPaymentMethod] = useState<'online' | 'pay_at_hotel'>('online');
 
   // Coupon System State
   const [couponCodeInput, setCouponCodeInput] = useState('');
@@ -46,15 +46,27 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
   const [paymentStatusNote, setPaymentStatusNote] = useState<string | null>(null);
   const [activePendingBookingId, setActivePendingBookingId] = useState<string | null>(null);
   const [confirmedBooking, setConfirmedBooking] = useState<Booking | null>(null);
-  const [gatewayConfig, setGatewayConfig] = useState<{ key_id: string; is_configured: boolean; mode: string } | null>(null);
+  const [gatewayConfig, setGatewayConfig] = useState<any>(null);
 
   useEffect(() => {
-    api.getPaymentConfig()
-      .then(setGatewayConfig)
-      .catch(() => {
-        setGatewayConfig({ key_id: 'phonepe_sbm_checkout', is_configured: false, mode: 'test' });
-      });
-  }, []);
+    const propCode = selectedResult?.property?.code;
+    if (propCode) {
+      api.getPaymentConfig(propCode)
+        .then(setGatewayConfig)
+        .catch(() => {
+          const defaultProvider = propCode === 'sbm-hotel' ? 'easebuzz' : 'phonepe';
+          setGatewayConfig({ provider: defaultProvider, is_configured: false, mode: 'test' });
+        });
+    }
+  }, [selectedResult?.property?.code]);
+
+  const isSBM1 = selectedResult.property.code === 'sbm-hotel';
+  const gatewayProvider = gatewayConfig?.provider || (isSBM1 ? 'easebuzz' : 'phonepe');
+  const isEasebuzz = gatewayProvider === 'easebuzz';
+  const gatewayBrandName = isEasebuzz ? 'Easebuzz' : 'PhonePe';
+  const paymentOptionSubtitle = isEasebuzz
+    ? 'UPI (GPay, PhonePe, Paytm, BHIM), Credit/Debit Cards, NetBanking & Wallets.'
+    : 'UPI, Debit & Credit Cards, NetBanking & PhonePe Wallet.';
 
   const cleanPhone = guestPhone.replace(/\D/g, '').replace(/^91/, '').replace(/^0/, '');
   const cleanEmail = guestEmail.trim().toLowerCase();
@@ -134,28 +146,11 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
 
       if (orderData.payment_url) {
         setCheckoutUrl(orderData.payment_url);
-        setPaymentStatusNote('Opening PhonePe secure payment gateway...');
-        setTimeout(() => {
-          try {
-            window.location.href = orderData.payment_url!;
-          } catch (e) {
-            console.warn('Navigation redirect failed', e);
-          }
-        }, 600);
+        setPaymentStatusNote(`Redirecting to ${gatewayBrandName} secure hosted checkout...`);
+        window.location.href = orderData.payment_url;
       } else {
-        const verifyRes = await api.verifyPayment({
-          booking_id: orderData.booking_id,
-          order_id: orderData.order_id,
-          transaction_id: `txn_${Date.now()}`
-        });
-        if (verifyRes.success && verifyRes.booking) {
-          setConfirmedBooking(verifyRes.booking);
-          setStep(3);
-          onSuccess(verifyRes.booking);
-        } else {
-          setError('Payment order created successfully.');
-          setLoading(false);
-        }
+        setLoading(false);
+        setError(`Unable to generate ${gatewayBrandName} checkout URL. Please try again or choose Pay at Reception.`);
       }
     } catch (err: any) {
       setLoading(false);
@@ -233,7 +228,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
       return;
     }
 
-    if (paymentMethod === 'online_phonepe') {
+    if (paymentMethod === 'online') {
       await handlePayOnline();
     } else {
       await handlePayAtHotel();
@@ -312,10 +307,10 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
               <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-xs space-y-2.5">
                 <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
                   <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                  <span>PhonePe Payment Gateway Ready</span>
+                  <span>{gatewayBrandName} Payment Gateway Ready</span>
                 </div>
                 <p className="text-xs text-emerald-800">
-                  Click the button below to proceed directly to the secure PhonePe payment gateway:
+                  Click the button below to proceed directly to the secure {gatewayBrandName} payment gateway:
                 </p>
                 <a
                   href={checkoutUrl}
@@ -324,7 +319,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                   className="inline-flex items-center justify-center gap-2 w-full bg-[#1A1A1A] hover:bg-[#C5A059] text-white py-3 px-4 font-bold text-xs uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
                 >
                   <Lock className="w-4 h-4 text-[#C5A059]" />
-                  <span>Open PhonePe Checkout &rarr;</span>
+                  <span>Open {gatewayBrandName} Checkout &rarr;</span>
                 </a>
               </div>
             )}
@@ -640,14 +635,14 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                   <div className="flex justify-between items-center">
                     <label className="block text-xs font-semibold text-[#1A1A1A]">Payment Option</label>
                     <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 border border-emerald-200">
-                      PhonePe Secure Checkout Active
+                      {gatewayBrandName} Secure Checkout Active
                     </span>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <label
-                      onClick={() => setPaymentMethod('online_phonepe')}
+                      onClick={() => setPaymentMethod('online')}
                       className={`p-3.5 border cursor-pointer flex items-start gap-3 transition-all ${
-                        paymentMethod === 'online_phonepe'
+                        paymentMethod === 'online'
                           ? 'bg-[#C5A059]/10 border-[#C5A059] text-[#1A1A1A] ring-1 ring-[#C5A059]'
                           : 'bg-white border-stone-200 text-[#666666] hover:border-stone-300'
                       }`}
@@ -655,13 +650,13 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                       <CreditCard className="w-5 h-5 text-[#C5A059] shrink-0 mt-0.5" />
                       <div>
                         <div className="text-xs font-semibold text-[#1A1A1A] flex items-center gap-1.5">
-                          <span>Pay Online (PhonePe)</span>
-                          {paymentMethod === 'online_phonepe' && (
+                          <span>Pay Online ({gatewayBrandName})</span>
+                          {paymentMethod === 'online' && (
                             <Check className="w-3.5 h-3.5 text-[#C5A059]" />
                           )}
                         </div>
                         <div className="text-[11px] text-[#666666] mt-0.5">
-                          UPI (GPay, PhonePe, Paytm), Cards, Netbanking & Wallets.
+                          {paymentOptionSubtitle}
                         </div>
                       </div>
                     </label>
@@ -725,7 +720,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                         <RefreshCw className="w-4 h-4 animate-spin text-[#C5A059]" />
                         {verifying ? 'Verifying Signature...' : 'Opening Checkout...'}
                       </span>
-                    ) : paymentMethod === 'online_phonepe' ? (
+                    ) : paymentMethod === 'online' ? (
                       <>
                         <Lock className="w-3.5 h-3.5 text-[#C5A059]" />
                         <span>PAY NOW (₹{finalTotalAmt.toLocaleString('en-IN')})</span>
