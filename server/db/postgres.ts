@@ -1868,9 +1868,16 @@ export async function postgresCreateReservation(input: any): Promise<any> {
     if (!Number.isFinite(pricePerNight) || pricePerNight <= 0) {
       throw new Error('This room has no admin-configured price yet. Please set its tariff in the Admin Panel before booking.');
     }
-    const subtotal = pricePerNight * nights * roomsRequested;
-    const tax = Math.round(subtotal * ((Number(roomType.tax_percent) || 12) / 100));
-    const totalAmount = subtotal + tax;
+    const grossAmount = pricePerNight * nights * roomsRequested;
+    const taxRate = (Number(roomType.tax_percent) || 12) / 100;
+    // Match the existing category tax treatment: Super Deluxe is GST-inclusive;
+    // other categories are GST-exclusive unless the schema is extended to store this flag.
+    const isTaxInclusive = roomType.room_code === 'super-deluxe';
+    const tax = isTaxInclusive
+      ? Math.round(grossAmount - (grossAmount / (1 + taxRate)))
+      : Math.round(grossAmount * taxRate);
+    const subtotal = isTaxInclusive ? grossAmount - tax : grossAmount;
+    const totalAmount = isTaxInclusive ? grossAmount : grossAmount + tax;
 
     await client.query(`
       INSERT INTO reservations (id, booking_number, property_id, property_code, property_name, guest_id, guest_name, guest_phone, guest_email, source, source_booking_id, room_type_id, room_name, room_number, check_in, check_out, adults, children, rooms_count, nights, status, price_per_night, subtotal, tax, total_amount, payment_status, payment_method, special_requests, internal_notes, created_by, created_at, updated_at)
