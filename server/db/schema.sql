@@ -70,13 +70,18 @@ CREATE TABLE IF NOT EXISTS rooms (
     active BOOLEAN DEFAULT TRUE,
     facilities JSONB DEFAULT '[]'::jsonb,
     images JSONB DEFAULT '[]'::jsonb,
-    price NUMERIC(10, 2) DEFAULT 2500.00,
+    price NUMERIC(10, 2) DEFAULT 0.00,
     max_guests INT DEFAULT 2,
     bed_type VARCHAR(64),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_property_room_number UNIQUE (property_id, room_number)
 );
+
+
+-- Additive compatibility migration for existing installations; do not rewrite stored room rates.
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS price NUMERIC(10, 2) DEFAULT 0.00;
+ALTER TABLE rooms ALTER COLUMN price SET DEFAULT 0.00;
 
 -- 4. GUESTS DIRECTORY TABLE
 CREATE TABLE IF NOT EXISTS guests (
