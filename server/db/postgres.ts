@@ -1869,7 +1869,9 @@ export async function postgresCreateReservation(input: any): Promise<any> {
       throw new Error('This room has no admin-configured price yet. Please set its tariff in the Admin Panel before booking.');
     }
     const grossAmount = pricePerNight * nights * roomsRequested;
-    const taxRate = (Number(roomType.tax_percent) || 12) / 100;
+    const settingsRes = await client.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
+    const configuredGstPercent = Number(settingsRes.rows[0]?.gst_percent);
+    const taxRate = (Number.isFinite(configuredGstPercent) && configuredGstPercent >= 0 ? configuredGstPercent : 12) / 100;
     // Match the existing category tax treatment: Super Deluxe is GST-inclusive;
     // other categories are GST-exclusive unless the schema is extended to store this flag.
     const isTaxInclusive = roomType.room_code === 'super-deluxe';
@@ -2221,6 +2223,11 @@ export async function postgresCheckAvailability(query: any): Promise<any[]> {
     rtQuery += ` AND property_code = $${rtParams.length}`;
   }
   const rtRes = await pool.query(rtQuery, rtParams);
+  const settingsRes = await pool.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
+  const configuredGstPercent = Number(settingsRes.rows[0]?.gst_percent);
+  const effectiveGstPercent = Number.isFinite(configuredGstPercent) && configuredGstPercent >= 0
+    ? configuredGstPercent
+    : 12;
 
   const results: any[] = [];
   for (const rt of rtRes.rows) {
@@ -2292,7 +2299,7 @@ export async function postgresCheckAvailability(query: any): Promise<any[]> {
         bed_information: rt.bed_information,
         amenities: typeof rt.amenities === 'string' ? JSON.parse(rt.amenities) : (rt.amenities || []),
         price_per_night: Number(rt.price_per_night),
-        tax_percent: Number(rt.tax_percent),
+        tax_percent: effectiveGstPercent,
         total_rooms: rt.total_rooms,
         images: typeof rt.images === 'string' ? JSON.parse(rt.images) : (rt.images || []),
         status: rt.status
@@ -2782,3 +2789,61 @@ export async function postgresGetCouponUsage(couponId: string): Promise<any[]> {
 
 
 
+
+
+// Admin-managed global GST setting. Keep PostgreSQL-backed PMS reservations in sync
+// with the same GST percentage used by the JSON-backed public booking engine.
+export async function postgresUpdateGstPercent(gstPercent: number): Promise<number> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  if (!Number.isFinite(gstPercent) || gstPercent < 0 || gstPercent > 100) {
+    throw new Error('GST percentage must be between 0 and 100.');
+  }
+  const result = await pool.query(
+    "UPDATE settings SET gst_percent = $1 WHERE id = 'default' RETURNING gst_percent",
+    [gstPercent]
+  );
+  if (!result.rows.length) throw new Error('Hotel settings row is missing in PostgreSQL.');
+  return Number(result.rows[0].gst_percent);
+}
+
+export async function postgresGetBlockedRooms(): Promise<any[]> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const result = await pool.query(
+    'SELECT id, property_id, property_code, room_type_id, room_code, start_date, end_date, quantity, reason, created_at FROM blocked_rooms ORDER BY created_at DESC'
+  );
+  return result.rows.map(row => ({
+    ...row,
+    start_date: String(row.start_date).slice(0, 10),
+    end_date: String(row.end_date).slice(0, 10),
+    quantity: Number(row.quantity),
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()
+  }));
+}
+
+export async function postgresCreateBlockedRoom(block: any): Promise<any> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const id = block.id || `blk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const result = await pool.query(`
+    INSERT INTO blocked_rooms
+      (id, property_id, property_code, room_type_id, room_code, start_date, end_date, quantity, reason, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+    RETURNING id, property_id, property_code, room_type_id, room_code, start_date, end_date, quantity, reason, created_at
+  `, [
+    id, block.property_id, block.property_code, block.room_type_id, block.room_code,
+    block.start_date, block.end_date, block.quantity || 1, block.reason || ''
+  ]);
+  const row = result.rows[0];
+  return {
+    ...row,
+    start_date: String(row.start_date).slice(0, 10),
+    end_date: String(row.end_date).slice(0, 10),
+    quantity: Number(row.quantity),
+    created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()
+  };
+}
+
+export async function postgresDeleteBlockedRoom(id: string): Promise<boolean> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const result = await pool.query('DELETE FROM blocked_rooms WHERE id = $1', [id]);
+  return (result.rowCount || 0) > 0;
+}
