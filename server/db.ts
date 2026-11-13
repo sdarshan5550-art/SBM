@@ -1122,7 +1122,7 @@ class DatabaseService {
                 'Hand Soap',
                 'Moisturizer'
               ],
-              price_per_night: 1999,
+              price_per_night: 0,
               tax_percent: 12,
               is_tax_inclusive: true,
               total_rooms: 0,
