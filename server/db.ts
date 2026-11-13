@@ -1508,8 +1508,18 @@ class DatabaseService {
         throw new Error(couponResult.error || 'Coupon is no longer valid. Please remove it and try again.');
       }
       bookingData.discount_amount = couponResult.discountAmount;
-      bookingData.tax_amount = couponResult.taxAmount;
-      bookingData.total_amount = couponResult.totalAmount;
+      const gstRate = (targetRes.roomType.tax_percent ?? this.data.settings.gst_percent ?? 12) / 100;
+      const isTaxInclusive = targetRes.roomType.is_tax_inclusive || targetRes.roomType.room_code === 'super-deluxe';
+      if (isTaxInclusive) {
+        bookingData.total_amount = Math.max(0, targetRes.totalAmount - couponResult.discountAmount);
+        bookingData.tax_amount = Math.round(
+          bookingData.total_amount - (bookingData.total_amount / (1 + gstRate))
+        );
+      } else {
+        const discountedSubtotal = Math.max(0, targetRes.subtotal - couponResult.discountAmount);
+        bookingData.tax_amount = Math.round(discountedSubtotal * gstRate);
+        bookingData.total_amount = discountedSubtotal + bookingData.tax_amount;
+      }
     }
 
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
