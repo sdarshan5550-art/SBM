@@ -22,6 +22,7 @@ import {
   postgresRecordCouponUsage,
   postgresGetCouponUsage,
   postgresUpdateGstPercent,
+  postgresGetGstPercent,
   postgresGetBlockedRooms,
   postgresCreateBlockedRoom,
   postgresDeleteBlockedRoom
@@ -1651,6 +1652,7 @@ async function startServer() {
         try {
           const pgSocial = await postgresGetSocialMediaSettings();
           settings.social_media = pgSocial;
+          settings.gst_percent = await postgresGetGstPercent();
         } catch (e) {
           // fallback to db.getSettings().social_media
         }
@@ -2351,6 +2353,12 @@ res.json({
 
   app.put('/api/admin/settings', authenticateAdmin, async (req, res) => {
     try {
+      if (req.body.gst_percent !== undefined) {
+        const gstPercent = Number(req.body.gst_percent);
+        if (!Number.isFinite(gstPercent) || gstPercent < 0 || gstPercent > 100) {
+          return res.status(400).json({ error: 'GST percentage must be between 0 and 100.' });
+        }
+      }
       const updated = db.updateSettings(req.body);
       if (isPostgresAvailable() && req.body.gst_percent !== undefined) {
         try {
