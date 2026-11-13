@@ -139,21 +139,6 @@ export const RoomManagementTab: React.FC = () => {
     'family': 3
   };
 
-  const getDefaultRoomPrice = (propertyCode?: string, roomCode?: string): number => {
-    const isHotel1 = !propertyCode || propertyCode === 'sbm-hotel';
-    if (isHotel1) {
-      if (roomCode === 'deluxe') return 1499;
-      if (roomCode === 'super-deluxe') return 1999;
-      if (roomCode === 'family') return 2999;
-      return 1499;
-    } else {
-      // SBM Guest House
-      if (roomCode === 'deluxe') return 2500;
-      if (roomCode === 'family') return 3500;
-      return 2500;
-    }
-  };
-
   const openCreate = () => {
     setEditingRoom(null);
 
@@ -163,7 +148,7 @@ export const RoomManagementTab: React.FC = () => {
       .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99));
 
     const firstRoomType = availableTypes[0];
-    const initialPrice = firstRoomType?.price_per_night || getDefaultRoomPrice(firstProperty?.code, firstRoomType?.room_code);
+    const initialPrice = Number(firstRoomType?.price_per_night) > 0 ? Number(firstRoomType?.price_per_night) : undefined;
 
     setForm({
       ...emptyRoom,
@@ -200,7 +185,7 @@ export const RoomManagementTab: React.FC = () => {
       .sort((a, b) => (CATEGORY_ORDER[a.room_code] || 99) - (CATEGORY_ORDER[b.room_code] || 99));
 
     const type = availableTypes[0];
-    const newPrice = type?.price_per_night || getDefaultRoomPrice(propertyCode, type?.room_code);
+    const newPrice = Number(type?.price_per_night) > 0 ? Number(type?.price_per_night) : undefined;
 
     setForm(prev => ({
       ...prev,
@@ -220,7 +205,7 @@ export const RoomManagementTab: React.FC = () => {
 
     if (!type) return;
 
-    const newPrice = type.price_per_night || getDefaultRoomPrice(form.property_code, type.room_code);
+    const newPrice = Number(type.price_per_night) > 0 ? Number(type.price_per_night) : undefined;
 
     setForm(prev => ({
       ...prev,
@@ -260,10 +245,15 @@ export const RoomManagementTab: React.FC = () => {
       return;
     }
 
+    const adminPrice = Number(form.price);
+    if (!Number.isFinite(adminPrice) || adminPrice <= 0) {
+      alert('Please enter a valid admin-set room price greater than ₹0.');
+      return;
+    }
+
     try {
       setSaving(true);
 
-      const defaultPrice = getDefaultRoomPrice(form.property_code, form.room_code);
       const payload = {
         property_code: form.property_code,
         property_name: form.property_name,
@@ -273,7 +263,7 @@ export const RoomManagementTab: React.FC = () => {
         room_number: form.room_number.trim(),
         floor: form.floor,
         status: form.status,
-        price: Number(form.price !== undefined && !isNaN(Number(form.price)) ? form.price : defaultPrice),
+        price: adminPrice,
         facilities: form.facilities || [],
         description: form.description || '',
         max_guests: Number(form.max_guests || 2),
@@ -508,7 +498,7 @@ export const RoomManagementTab: React.FC = () => {
 
                     <td className="p-4">
                       <span className="font-serif font-bold text-sm text-[#C5A059]">
-                        ₹{(room.price ?? getDefaultRoomPrice(room.property_code, room.room_code)).toLocaleString('en-IN')}
+                        {Number(room.price) > 0 ? `₹${Number(room.price).toLocaleString('en-IN')}` : 'Price not configured'}
                       </span>
                     </td>
 
@@ -808,14 +798,14 @@ export const RoomManagementTab: React.FC = () => {
                     min="0"
                     step="1"
                     required
-                    value={form.price ?? getDefaultRoomPrice(form.property_code, form.room_code)}
+                    value={form.price ?? ''}
                     onChange={e =>
                       setForm({
                         ...form,
                         price: Number(e.target.value)
                       })
                     }
-                    placeholder={String(getDefaultRoomPrice(form.property_code, form.room_code))}
+                    placeholder="Enter admin-set price"
                     className="w-full border border-stone-200 p-3 text-sm font-semibold text-[#C5A059]"
                   />
                 </div>
