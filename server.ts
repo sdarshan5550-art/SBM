@@ -1737,7 +1737,16 @@ async function startServer() {
         if (msgLower.includes('temple') || msgLower.includes('distance') || msgLower.includes('far') || msgLower.includes('location')) {
           fastReply = 'SBM Hotel is situated on Main Temple Road, directly opposite Salasar Balaji Temple — just a 2-minute walk! SBM 2 Guest House is located nearby on Temple Approach Road, offering a peaceful environment.';
         } else if (msgLower.includes('price') || msgLower.includes('cost') || msgLower.includes('rate') || msgLower.includes('deluxe') || msgLower.includes('family')) {
-          fastReply = 'We offer strictly two luxury room categories across our properties:\n\n• **Deluxe Room**: ₹2,500/night (+12% GST) — Max 2 adults\n• **Family Suite**: ₹3,500/night (+12% GST) — Max 4-5 adults\n\nAll rooms feature air conditioning, free Wi-Fi, 24/7 hot water, attached private bathroom, and Smart TV.';
+          const fastRoomTypes = db.getRoomTypes();
+          const fastTariffs = fastRoomTypes.map(room => {
+            const configuredPrice = Number(room.price_per_night);
+            const tariff = Number.isFinite(configuredPrice) && configuredPrice > 0
+              ? `₹${configuredPrice.toLocaleString('en-IN')}/night`
+              : 'Price not configured';
+            const propertyName = room.property_code === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel';
+            return `• **${propertyName} — ${room.name}**: ${tariff}`;
+          });
+          fastReply = `Current room tariffs are managed by the hotel administration:\n\n${fastTariffs.join('\n')}\n\nPlease refer to the live booking page for availability and applicable taxes.`;
         } else if (msgLower.includes('contact') || msgLower.includes('phone') || msgLower.includes('number') || msgLower.includes('email')) {
           fastReply = 'You can reach our front desk anytime:\n\n• **SBM Hotel**: +91 99835 67921, +91 98285 23333 (sbmhotel@gmail.com)\n• **SBM 2 Guest House**: +91 98285 00845, +91 98285 00855 (sbmguesthouse@gmail.com)';
         } else if (msgLower.includes('check-in') || msgLower.includes('check in') || msgLower.includes('check out') || msgLower.includes('time') || msgLower.includes('timing')) {
