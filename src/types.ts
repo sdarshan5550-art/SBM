@@ -507,6 +507,7 @@ export interface BlockedRoom {
   room_code: RoomCategoryCode;
   start_date: string; // YYYY-MM-DD
   end_date: string; // YYYY-MM-DD (exclusive)
+  end_date_inclusive?: boolean; // true when the admin entered an inclusive end date
   quantity: number;
   reason: string;
   created_at: string;

@@ -1433,7 +1433,8 @@ class DatabaseService {
       let taxAmount: number;
       let totalAmount: number;
 
-      const gstRate = (room.tax_percent ?? this.data.settings.gst_percent ?? 12) / 100;
+      // The GST percentage in System Configuration is the global source of truth.
+      const gstRate = (Number(this.getSettings().gst_percent) || 0) / 100;
       if (room.is_tax_inclusive || room.room_code === 'super-deluxe') {
         // Tariff is inclusive of GST
         totalAmount = room.price_per_night * nights * (query.rooms || 1);
@@ -1530,7 +1531,7 @@ class DatabaseService {
         throw new Error(couponResult.error || 'Coupon is no longer valid. Please remove it and try again.');
       }
       bookingData.discount_amount = couponResult.discountAmount;
-      const gstRate = (targetRes.roomType.tax_percent ?? this.data.settings.gst_percent ?? 12) / 100;
+      const gstRate = (Number(this.getSettings().gst_percent) || 0) / 100;
       const isTaxInclusive = targetRes.roomType.is_tax_inclusive || targetRes.roomType.room_code === 'super-deluxe';
       if (isTaxInclusive) {
         bookingData.total_amount = Math.max(0, targetRes.totalAmount - couponResult.discountAmount);
@@ -2258,9 +2259,14 @@ class DatabaseService {
 
     const roomsCount = input.rooms || 1;
     const pricePerNight = roomType.price_per_night;
-    const subtotal = pricePerNight * nights * roomsCount;
-    const tax = Math.round(subtotal * (this.data.settings.gst_percent / 100));
-    const totalAmount = subtotal + tax;
+    const grossAmount = pricePerNight * nights * roomsCount;
+    const gstRate = (Number(this.getSettings().gst_percent) || 0) / 100;
+    const isTaxInclusive = roomType.is_tax_inclusive || roomType.room_code === 'super-deluxe';
+    const tax = isTaxInclusive
+      ? Math.round(grossAmount - (grossAmount / (1 + gstRate)))
+      : Math.round(grossAmount * gstRate);
+    const subtotal = isTaxInclusive ? grossAmount - tax : grossAmount;
+    const totalAmount = isTaxInclusive ? grossAmount : grossAmount + tax;
 
     // Upsert guest record
     const guest = this.upsertGuest({

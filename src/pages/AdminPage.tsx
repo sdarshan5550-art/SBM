@@ -323,19 +323,38 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
   const handleCreateBlock = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newBlockRoomId || !newBlockStart || !newBlockEnd) return;
+    if (newBlockStart > newBlockEnd) {
+      alert('End Date must be on or after Start Date.');
+      return;
+    }
+    if (!Number.isInteger(Number(newBlockQty)) || Number(newBlockQty) < 1) {
+      alert('Blocked quantity must be at least 1 room.');
+      return;
+    }
     try {
-      const selectedRoom = roomTypes.find(r => r.id === newBlockRoomId);
+      const selectedRoom = roomTypes.find(r => r.id === newBlockRoomId && r.property_code === newBlockProp);
+      if (!selectedRoom) {
+        alert('Please select a room category belonging to the selected property.');
+        return;
+      }
+      // Admin-entered End Date is inclusive. Store the next day as the
+      // exclusive boundary used by the inventory engine [start, end).
+      const exclusiveEnd = new Date(`${newBlockEnd}T00:00:00.000Z`);
+      exclusiveEnd.setUTCDate(exclusiveEnd.getUTCDate() + 1);
+      const endDateExclusive = exclusiveEnd.toISOString().slice(0, 10);
       await api.createBlockedRoom({
-        property_id: selectedRoom?.property_id,
+        property_id: selectedRoom.property_id,
         property_code: newBlockProp as any,
-        room_type_id: newBlockRoomId,
-        room_code: selectedRoom?.room_code,
+        room_type_id: selectedRoom.id,
+        room_code: selectedRoom.room_code,
         start_date: newBlockStart,
-        end_date: newBlockEnd,
+        end_date: endDateExclusive,
+        end_date_inclusive: true,
         quantity: Number(newBlockQty),
         reason: newBlockReason
       });
-      api.getBlockedRooms().then(setBlockedRooms);
+      const refreshedBlocks = await api.getBlockedRooms();
+      setBlockedRooms(refreshedBlocks);
       setNewBlockStart('');
       setNewBlockEnd('');
     } catch (err: any) {
@@ -1507,7 +1526,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                 <label className="block text-[#666666] mb-1 font-medium">Property</label>
                 <select
                   value={newBlockProp}
-                  onChange={(e) => setNewBlockProp(e.target.value)}
+                  onChange={(e) => {
+                    setNewBlockProp(e.target.value);
+                    setNewBlockRoomId('');
+                  }}
                   className="w-full bg-[#FDFCFB] border border-stone-200 p-2.5 text-[#1A1A1A]"
                 >
                   <option value="sbm-hotel">SBM Hotel</option>
@@ -1541,7 +1563,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
               </div>
 
               <div>
-                <label className="block text-[#666666] mb-1 font-medium">End Date</label>
+                <label className="block text-[#666666] mb-1 font-medium">End Date (inclusive)</label>
                 <input
                   type="date"
                   required
@@ -1581,7 +1603,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                     {blockedRooms.map(blk => (
                       <tr key={blk.id}>
                         <td className="p-3 font-semibold text-[#C5A059]">{blk.property_code} — {blk.room_code}</td>
-                        <td className="p-3">{blk.start_date} to {blk.end_date}</td>
+                        <td className="p-3">{blk.start_date} to {blk.end_date_inclusive ? (() => { const d = new Date(`${blk.end_date}T00:00:00.000Z`); d.setUTCDate(d.getUTCDate() - 1); return d.toISOString().slice(0, 10); })() : blk.end_date}</td>
                         <td className="p-3">{blk.quantity} Room(s)</td>
                         <td className="p-3 text-[#666666]">{blk.reason}</td>
                         <td className="p-3">
@@ -1659,8 +1681,13 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
 
             <button
               onClick={async () => {
-                await api.updateAdminSettings(settings);
-                alert('Settings updated!');
+                try {
+                  const savedSettings = await api.updateAdminSettings(settings);
+                  setSettings(savedSettings);
+                  alert('Settings updated and saved successfully!');
+                } catch (error: any) {
+                  alert(error.message || 'Failed to save settings.');
+                }
               }}
               className="bg-[#1A1A1A] hover:bg-[#C5A059] text-white font-bold px-5 py-2.5 transition-colors cursor-pointer uppercase text-[10px] tracking-[0.15em]"
             >
