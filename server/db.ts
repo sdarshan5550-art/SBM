@@ -207,7 +207,7 @@ function getInitialData(): DatabaseData {
         'Tea/Coffee Maker'
       ],
       price_per_night: 0,
-      tax_percent: 12,
+      tax_percent: 0,
       total_rooms: 10,
       images: ROOM_PHOTOS.sbmDeluxe,
       status: 'active'
@@ -232,7 +232,7 @@ function getInitialData(): DatabaseData {
         'Moisturizer'
       ],
       price_per_night: 0,
-      tax_percent: 12,
+      tax_percent: 0,
       is_tax_inclusive: true,
       total_rooms: 0,
       images: [],
@@ -257,7 +257,7 @@ function getInitialData(): DatabaseData {
         '24/7 Room Service'
       ],
       price_per_night: 0,
-      tax_percent: 12,
+      tax_percent: 0,
       total_rooms: 5,
       images: ROOM_PHOTOS.sbmFamily,
       status: 'active'
@@ -280,7 +280,7 @@ function getInitialData(): DatabaseData {
         'Room Service'
       ],
       price_per_night: 0,
-      tax_percent: 12,
+      tax_percent: 0,
       total_rooms: 8,
       images: ROOM_PHOTOS.ghDeluxe,
       status: 'active'
@@ -303,7 +303,7 @@ function getInitialData(): DatabaseData {
         'Power Backup'
       ],
       price_per_night: 0,
-      tax_percent: 12,
+      tax_percent: 0,
       total_rooms: 4,
       images: ROOM_PHOTOS.ghFamily,
       status: 'active'
@@ -372,7 +372,7 @@ function getInitialData(): DatabaseData {
     inquiries: [],
     settings: {
       hotel_name: 'SBM Hotel',
-      gst_percent: 12,
+      gst_percent: 0,
       hold_pending_inventory: true,
       cancellation_policy: 'Full refund if cancelled 48 hours before check-in. 50% refund within 24-48 hours. No refund for same-day cancellation or no-show.',
       payment_gateway_mode: 'test',
@@ -1124,7 +1124,7 @@ class DatabaseService {
                 'Moisturizer'
               ],
               price_per_night: 0,
-              tax_percent: 12,
+              tax_percent: 0,
               is_tax_inclusive: true,
               total_rooms: 0,
               images: [],
@@ -2921,7 +2921,7 @@ class DatabaseService {
     if (!this.data.settings) {
       this.data.settings = {
         hotel_name: 'SBM Hotel',
-        gst_percent: 12,
+        gst_percent: 0,
         hold_pending_inventory: true,
         cancellation_policy: 'Full refund if cancelled 48 hours before check-in.',
         payment_gateway_mode: 'test',
@@ -4420,7 +4420,7 @@ class DatabaseService {
 
     discount = Math.min(discount, bookingAmount);
 
-    const gstPercent = this.data.settings.gst_percent || 12;
+    const gstPercent = Number(this.data.settings.gst_percent ?? 0);
     const taxableAmount = Math.max(0, bookingAmount - discount);
     const taxAmount = Math.round(taxableAmount * (gstPercent / 100));
     const totalAmount = taxableAmount + taxAmount;
