@@ -1375,7 +1375,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
       {activeTab === 'inventory' && (
         <div className="space-y-6">
           <div className="bg-[#C5A059]/10 border border-[#C5A059]/30 p-4 text-xs text-[#1A1A1A]">
-            <strong>Room Categories Notice:</strong> SBM Hotel 1 inventory comprises three official categories: <strong>Deluxe Room</strong> (₹1,499/night default), <strong>Super Deluxe Room</strong> (₹1,999/night default, inclusive of GST), and <strong>Family Suite</strong> (₹2,999/night default). Tariff modifications saved here are persistently updated across customer listings and real-time reservation engines. SBM Guest House maintains independent pricing.
+            <strong>Room Categories Notice:</strong> Room tariffs and the global GST percentage are controlled by the Admin Panel. Changes saved here are used by customer listings and reservation calculations.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1418,7 +1418,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                           <span className="text-[10px] uppercase text-[#666666] block tracking-wider">Price Per Night</span>
                           <span className="text-lg font-bold text-[#C5A059]">₹{room.price_per_night.toLocaleString('en-IN')}</span>
                           <span className="text-[9px] text-[#888888] block">
-                            {isTaxInclusive ? '(incl. of GST)' : '+ 12% GST'}
+                            {isTaxInclusive ? '(incl. of GST)' : `+ ${settings.gst_percent ?? 0}% GST`}
                           </span>
                         </div>
 

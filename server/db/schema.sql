@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS room_types (
     bed_information VARCHAR(128),
     amenities JSONB DEFAULT '[]'::jsonb,
     price_per_night NUMERIC(10, 2) NOT NULL,
-    tax_percent NUMERIC(5, 2) DEFAULT 12.00,
+    tax_percent NUMERIC(5, 2) DEFAULT 0.00,
     total_rooms INT DEFAULT 10,
     images JSONB DEFAULT '[]'::jsonb,
     status VARCHAR(32) DEFAULT 'active',
@@ -297,7 +297,7 @@ CREATE TABLE IF NOT EXISTS inquiries (
 CREATE TABLE IF NOT EXISTS settings (
     id VARCHAR(32) PRIMARY KEY DEFAULT 'default',
     hotel_name VARCHAR(128) DEFAULT 'SBM Hotel & SBM 2 Guest House',
-    gst_percent NUMERIC(5, 2) DEFAULT 12.00,
+    gst_percent NUMERIC(5, 2) DEFAULT 0.00,
     hold_pending_inventory BOOLEAN DEFAULT TRUE,
     cancellation_policy TEXT,
     payment_gateway_mode VARCHAR(16) DEFAULT 'test',
@@ -306,6 +306,8 @@ CREATE TABLE IF NOT EXISTS settings (
     social_media JSONB DEFAULT '{"instagram":{"platform":"instagram","enabled":true,"url":"https://www.instagram.com/sbmhotel","show_in_header":true,"show_on_contact":true,"show_in_footer":true},"facebook":{"platform":"facebook","enabled":true,"url":"https://www.facebook.com/sbmhotel","show_in_header":true,"show_on_contact":true,"show_in_footer":true}}'::jsonb,
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+ALTER TABLE settings ALTER COLUMN gst_percent SET DEFAULT 0.00;
+ALTER TABLE room_types ALTER COLUMN tax_percent SET DEFAULT 0.00;
 
 -- 15B. SOCIAL MEDIA SETTINGS TABLE (Normalized relational store)
 CREATE TABLE IF NOT EXISTS social_media_settings (

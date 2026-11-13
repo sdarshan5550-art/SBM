@@ -141,7 +141,7 @@ if (!fs.existsSync(jsonPath)) return;
           rt.bed_information || '',
           JSON.stringify(rt.amenities || []),
           rt.price_per_night,
-          rt.tax_percent || 12,
+          rt.tax_percent ?? 0,
           rt.total_rooms || 10,
           JSON.stringify(rt.images || []),
           rt.status || 'active'
@@ -361,7 +361,7 @@ if (!fs.existsSync(jsonPath)) return;
           social_media = EXCLUDED.social_media
       `, [
         s.hotel_name || 'SBM Hotel & SBM 2 Guest House',
-        s.gst_percent || 12,
+        s.gst_percent ?? 0,
         s.hold_pending_inventory ?? true,
         s.cancellation_policy || '',
         s.payment_gateway_mode || 'test',
@@ -1871,7 +1871,10 @@ export async function postgresCreateReservation(input: any): Promise<any> {
     const grossAmount = pricePerNight * nights * roomsRequested;
     const settingsRes = await client.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
     const configuredGstPercent = Number(settingsRes.rows[0]?.gst_percent);
-    const taxRate = (Number.isFinite(configuredGstPercent) && configuredGstPercent >= 0 ? configuredGstPercent : 12) / 100;
+    if (!Number.isFinite(configuredGstPercent) || configuredGstPercent < 0 || configuredGstPercent > 100) {
+      throw new Error('A valid GST percentage must be configured in Admin Settings before creating a reservation.');
+    }
+    const taxRate = configuredGstPercent / 100;
     // Match the existing category tax treatment: Super Deluxe is GST-inclusive;
     // other categories are GST-exclusive unless the schema is extended to store this flag.
     const isTaxInclusive = roomType.room_code === 'super-deluxe';
@@ -2225,9 +2228,10 @@ export async function postgresCheckAvailability(query: any): Promise<any[]> {
   const rtRes = await pool.query(rtQuery, rtParams);
   const settingsRes = await pool.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
   const configuredGstPercent = Number(settingsRes.rows[0]?.gst_percent);
-  const effectiveGstPercent = Number.isFinite(configuredGstPercent) && configuredGstPercent >= 0
-    ? configuredGstPercent
-    : 12;
+  if (!Number.isFinite(configuredGstPercent) || configuredGstPercent < 0 || configuredGstPercent > 100) {
+    throw new Error('A valid GST percentage must be configured in Admin Settings.');
+  }
+  const effectiveGstPercent = configuredGstPercent;
 
   const results: any[] = [];
   for (const rt of rtRes.rows) {

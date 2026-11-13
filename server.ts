@@ -436,7 +436,7 @@ async function startServer() {
       let taxAmount: number;
       let totalAmount: number;
 
-      const gstPercent = matchedResult.roomType.tax_percent ?? db.getSettings().gst_percent ?? 12;
+      const gstPercent = Number(db.getSettings().gst_percent ?? 0);
       const isInclusive = matchedResult.roomType.is_tax_inclusive || matchedResult.roomType.room_code === 'super-deluxe';
 
       if (isInclusive) {
@@ -653,7 +653,7 @@ async function startServer() {
       }
 
       const allProperties = db.getProperties();
-      const gstPercent = db.getSettings().gst_percent || 12;
+      const gstPercent = Number(db.getSettings().gst_percent ?? 0);
       const groupSuffix = Math.floor(100000 + Math.random() * 900000);
       const groupBookingNumber = `SBM-COMBINED-${groupSuffix}`;
       const groupId = `grp-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -3847,7 +3847,7 @@ res.json({
         const sampleRoomRate = Number(
           db.getRoomTypes('sbm-hotel').find(room => room.room_code === 'deluxe')?.price_per_night
         ) || 0;
-        const sampleTax = Math.round(sampleRoomRate * ((Number(db.getSettings().gst_percent) || 12) / 100));
+        const sampleTax = Math.round(sampleRoomRate * (Number(db.getSettings().gst_percent ?? 0) / 100));
         sampleBooking = {
           id: 'test-bk-101',
           booking_number: 'SBM-2026-TEST',
