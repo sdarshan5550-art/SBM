@@ -249,7 +249,7 @@ if (!fs.existsSync(jsonPath)) return;
           b.rooms_requested || 1,
           b.nights || 1,
           b.booking_status || 'Confirmed',
-          b.price_per_night || 2500,
+          Number(b.price_per_night) || 0,
           b.room_subtotal || b.total_amount,
           b.tax_amount || 0,
           b.total_amount,
@@ -1052,7 +1052,7 @@ export async function postgresSavePMSRatePlan(plan: any): Promise<any> {
     plan.name,
     plan.code,
     plan.meal_plan || 'EP',
-    plan.base_price || 2500,
+    Number(plan.base_price) > 0 ? Number(plan.base_price) : 0,
     plan.cancellation_policy || 'MODERATE',
     plan.active !== undefined ? plan.active : true
   ]);
@@ -1802,10 +1802,13 @@ export async function postgresCreateReservation(input: any): Promise<any> {
     const reservationId = input.id || `bkg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     const bookingNumber = input.booking_number || `SBM-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
     const nights = Math.max(1, Math.ceil((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)));
-    const pricePerNight = input.price_per_night || roomType.price_per_night || 2500;
-    const subtotal = input.room_subtotal || (pricePerNight * nights * roomsRequested);
-    const tax = input.tax_amount || (subtotal * 0.12);
-    const totalAmount = input.total_amount || (subtotal + tax);
+    const pricePerNight = Number(roomType.price_per_night);
+    if (!Number.isFinite(pricePerNight) || pricePerNight <= 0) {
+      throw new Error('This room has no admin-configured price yet. Please set its tariff in the Admin Panel before booking.');
+    }
+    const subtotal = pricePerNight * nights * roomsRequested;
+    const tax = Math.round(subtotal * ((Number(roomType.tax_percent) || 12) / 100));
+    const totalAmount = subtotal + tax;
 
     await client.query(`
       INSERT INTO reservations (id, booking_number, property_id, property_code, property_name, guest_id, guest_name, guest_phone, guest_email, source, source_booking_id, room_type_id, room_name, room_number, check_in, check_out, adults, children, rooms_count, nights, status, price_per_night, subtotal, tax, total_amount, payment_status, payment_method, special_requests, internal_notes, created_by, created_at, updated_at)
