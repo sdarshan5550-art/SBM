@@ -2152,10 +2152,10 @@ const requestedPrice =
 
 if (
   requestedPrice !== undefined &&
-  (!Number.isFinite(requestedPrice) || requestedPrice < 0)
+  (!Number.isFinite(requestedPrice) || requestedPrice <= 0)
 ) {
   return res.status(400).json({
-    error: 'Invalid room price.'
+    error: 'Room price must be greater than ₹0. Set a positive admin-configured tariff before saving.'
   });
 }
 
