@@ -7,7 +7,7 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
-import { db, getDefaultRoomPrice } from './server/db';
+import { db } from './server/db';
 import { AvailabilitySearchQuery } from './src/types';
 import {
   initializePostgres,
@@ -1737,7 +1737,16 @@ async function startServer() {
         if (msgLower.includes('temple') || msgLower.includes('distance') || msgLower.includes('far') || msgLower.includes('location')) {
           fastReply = 'SBM Hotel is situated on Main Temple Road, directly opposite Salasar Balaji Temple — just a 2-minute walk! SBM 2 Guest House is located nearby on Temple Approach Road, offering a peaceful environment.';
         } else if (msgLower.includes('price') || msgLower.includes('cost') || msgLower.includes('rate') || msgLower.includes('deluxe') || msgLower.includes('family')) {
-          fastReply = 'We offer strictly two luxury room categories across our properties:\n\n• **Deluxe Room**: ₹2,500/night (+12% GST) — Max 2 adults\n• **Family Suite**: ₹3,500/night (+12% GST) — Max 4-5 adults\n\nAll rooms feature air conditioning, free Wi-Fi, 24/7 hot water, attached private bathroom, and Smart TV.';
+          const fastRoomTypes = db.getRoomTypes();
+          const fastTariffs = fastRoomTypes.map(room => {
+            const configuredPrice = Number(room.price_per_night);
+            const tariff = Number.isFinite(configuredPrice) && configuredPrice > 0
+              ? `₹${configuredPrice.toLocaleString('en-IN')}/night`
+              : 'Price not configured';
+            const propertyName = room.property_code === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel';
+            return `• **${propertyName} — ${room.name}**: ${tariff}`;
+          });
+          fastReply = `Current room tariffs are managed by the hotel administration:\n\n${fastTariffs.join('\n')}\n\nPlease refer to the live booking page for availability and applicable taxes.`;
         } else if (msgLower.includes('contact') || msgLower.includes('phone') || msgLower.includes('number') || msgLower.includes('email')) {
           fastReply = 'You can reach our front desk anytime:\n\n• **SBM Hotel**: +91 99835 67921, +91 98285 23333 (sbmhotel@gmail.com)\n• **SBM 2 Guest House**: +91 98285 00845, +91 98285 00855 (sbmguesthouse@gmail.com)';
         } else if (msgLower.includes('check-in') || msgLower.includes('check in') || msgLower.includes('check out') || msgLower.includes('time') || msgLower.includes('timing')) {
@@ -1816,7 +1825,13 @@ async function startServer() {
       // Knowledge context compilation
       const knowledgeText = knowledgeItems.map(k => `[${k.category} - ${k.title}]: ${k.content}`).join('\n');
       const propertiesText = properties.map(p => `${p.name} (${p.code}): ${p.address}. Phone: ${p.phone}. Email: ${p.email}. Amenities: ${p.amenities.join(', ')}`).join('\n');
-      const roomTypesText = roomTypes.map(r => `${r.name} at ${r.property_code}: ₹${r.price_per_night}/night + 12% GST. Capacity: ${r.capacity} guests. Bedding: ${r.bed_information}. Amenities: ${r.amenities.join(', ')}`).join('\n');
+      const roomTypesText = roomTypes.map(r => {
+        const adminPrice = Number(r.price_per_night);
+        const priceText = Number.isFinite(adminPrice) && adminPrice > 0
+          ? `₹${adminPrice.toLocaleString('en-IN')}/night`
+          : 'Price not configured by admin; do not quote a price or recommend booking';
+        return `${r.name} at ${r.property_code}: ${priceText}. Capacity: ${r.capacity} guests. Bedding: ${r.bed_information}. Amenities: ${r.amenities.join(', ')}`;
+      }).join('\n');
 
       const systemInstruction = `You are "SBM Concierge", the official AI Hotel Concierge for SBM Hotel and SBM 2 Guest House in Salasar, Rajasthan.
 Your tagline is: "Your personal guide to a comfortable stay in Salasar."
@@ -1827,17 +1842,16 @@ Help visitors quickly get accurate answers about the hotel, amenities, room opti
 CRITICAL MANDATES (DO NOT HALLUCINATE):
 1. Use ONLY the official hotel database knowledge provided below as your source of truth.
 2. NEVER invent or hallucinate room amenities, prices, discounts, fake availability, hotel facilities, policies, distances, reviews, ratings, offers, or services.
-3. The official room categories and default pricing:
-   • SBM Hotel 1: "Deluxe Room" (₹1,499/night), "Super Deluxe Room" (₹1,999/night inclusive of GST), and "Family Suite" (₹2,999/night).
-   • SBM Guest House: "Deluxe Room" (₹2,500/night) and "Family Suite" (₹3,500/night).
-4. If information is unavailable or not in your context, respond politely:
+3. Never use default, remembered, or hard-coded room prices. The live roomTypesText below is the only source for current admin-configured tariffs.
+4. If a room says "Price not configured by admin", do not quote a price, calculate a total, or recommend booking it. Direct the guest to contact the hotel.
+5. If information is unavailable or not in your context, respond politely:
 "I don't have that information available right now. Please contact SBM Hotel for assistance."
-5. Never reveal admin credentials, system database structures, API keys, or private customer bookings.
-6. ROOM RECOMMENDATION RULES:
-   - For 1-2 guests at SBM Hotel 1: Recommend Deluxe Room (₹1,499/night) or Super Deluxe Room (₹1,999/night inclusive of GST, 1 King Bed).
-   - For 1-2 guests at SBM Guest House: Recommend Deluxe Room (₹2,500/night).
-   - For 3-5 guests or families: Recommend Family Suite (₹2,999/night at SBM Hotel 1, ₹3,500/night at SBM Guest House).
-7. Always maintain a warm, luxury, polite hospitality tone.
+6. Never reveal admin credentials, system database structures, API keys, or private customer bookings.
+7. ROOM RECOMMENDATION RULES:
+   - Recommend only room categories with a positive admin-configured price.
+   - Quote the exact current price from roomTypesText; never invent or reuse a previous tariff.
+   - For 3-5 guests or families, recommend a configured Family Suite only.
+8. Always maintain a warm, luxury, polite hospitality tone.
 
 OFFICIAL HOTEL KNOWLEDGE BASE:
 ${knowledgeText}
@@ -1888,7 +1902,7 @@ ${JSON.stringify(liveAvail, null, 2)}
               propertyName: recProp === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel',
               roomCode: parsed.recommendedRoomCode,
               roomName: matchedRoom ? matchedRoom.name : (parsed.recommendedRoomCode === 'family' ? 'Family Suite' : (parsed.recommendedRoomCode === 'super-deluxe' ? 'Super Deluxe Room' : 'Deluxe Room')),
-              pricePerNight: matchedRoom ? matchedRoom.price_per_night : getDefaultRoomPrice(recProp, parsed.recommendedRoomCode),
+              pricePerNight: matchedRoom && Number(matchedRoom.price_per_night) > 0 ? Number(matchedRoom.price_per_night) : undefined,
               reason: parsed.recommendationReason || 'Ideal choice for your group size.'
             };
           }
@@ -1910,21 +1924,34 @@ ${JSON.stringify(liveAvail, null, 2)}
       if (msgLower.includes('temple') || msgLower.includes('distance') || msgLower.includes('far')) {
         replyText = 'SBM Hotel is situated on Main Temple Road, directly opposite Salasar Balaji Temple — just a 2-minute walk! SBM 2 Guest House is located nearby on Temple Approach Road, offering a peaceful environment.';
       } else if (msgLower.includes('price') || msgLower.includes('cost') || msgLower.includes('rate') || msgLower.includes('deluxe') || msgLower.includes('super deluxe') || msgLower.includes('family')) {
-        replyText = 'We offer luxury room categories across our properties in Salasar:\n\n• **SBM Hotel 1**:\n  - **Deluxe Room**: ₹1,499/night (+12% GST)\n  - **Super Deluxe Room**: ₹1,999/night (inclusive of GST)\n  - **Family Suite**: ₹2,999/night (+12% GST)\n\n• **SBM Guest House**:\n  - **Deluxe Room**: ₹2,500/night (+12% GST)\n  - **Family Suite**: ₹3,500/night (+12% GST)\n\nAll rooms feature air conditioning, free Wi-Fi, 24/7 hot water, attached private bathroom, and TV.';
+        const tariffLines = roomTypes.map(room => {
+          const adminPrice = Number(room.price_per_night);
+          const tariff = Number.isFinite(adminPrice) && adminPrice > 0
+            ? `₹${adminPrice.toLocaleString('en-IN')}/night`
+            : 'Price not configured';
+          const propertyLabel = room.property_code === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel';
+          return `• **${propertyLabel} — ${room.name}**: ${tariff}`;
+        });
+        replyText = `Current room tariffs are set by the hotel administration:\n\n${tariffLines.join('\n')}\n\nPlease use the live booking page to check availability and the final payable amount.`;
       } else if (msgLower.includes('contact') || msgLower.includes('phone') || msgLower.includes('number') || msgLower.includes('email')) {
         replyText = 'You can reach us anytime:\n\n• **SBM Hotel**: +91 99835 67921, +91 98285 23333 (sbmhotel@gmail.com)\n• **SBM 2 Guest House**: +91 98285 00845, +91 98285 00855 (sbmguesthouse@gmail.com)';
       } else if (msgLower.includes('check-in') || msgLower.includes('check in') || msgLower.includes('check out') || msgLower.includes('time')) {
         replyText = 'Standard Check-in time is **12:00 PM** and Check-out time is **11:00 AM**. 24-hour reception is available for late arrivals.';
       } else if (msgLower.includes('4') || msgLower.includes('family') || msgLower.includes('group')) {
-        replyText = 'For 4 or more guests, I highly recommend our spacious **Family Suite** (₹2,999/night at SBM Hotel 1, ₹3,500/night at SBM Guest House), which comes with dual double beds and generous living space for families.';
-        recObj = {
-          propertyCode: 'sbm-hotel',
-          propertyName: 'SBM Hotel',
-          roomCode: 'family',
-          roomName: 'Family Suite',
-          pricePerNight: 2999,
-          reason: 'Suitable for families and group travelers.'
-        };
+        const familyRoom = roomTypes.find(room => room.room_code === 'family' && Number(room.price_per_night) > 0);
+        if (familyRoom) {
+          replyText = `For 4 or more guests, I recommend the **${familyRoom.name}** at ${familyRoom.property_code === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel'}. The current admin-configured rate is ₹${Number(familyRoom.price_per_night).toLocaleString('en-IN')} per night.`;
+          recObj = {
+            propertyCode: familyRoom.property_code,
+            propertyName: familyRoom.property_code === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel',
+            roomCode: familyRoom.room_code,
+            roomName: familyRoom.name,
+            pricePerNight: Number(familyRoom.price_per_night),
+            reason: 'Suitable for families and group travelers.'
+          };
+        } else {
+          replyText = 'The Family Suite tariff has not been configured by the hotel yet. Please contact the hotel for current pricing.';
+        }
       } else if (isAvailabilityQuery) {
         if (liveAvail.length > 0 && liveAvail.some(a => a.isAvailable)) {
           replyText = `Certainly. I checked live availability for ${searchCheckIn} to ${searchCheckOut}. Here are the available rooms for your stay:`;
@@ -1932,7 +1959,7 @@ ${JSON.stringify(liveAvail, null, 2)}
           replyText = `I'm sorry, there are no rooms available for those selected dates (${searchCheckIn} to ${searchCheckOut}). Please try different dates or check our other property!`;
         }
       } else {
-        replyText = `Welcome to SBM Hotel & SBM 2 Guest House! I am SBM Concierge. How may I assist you with your stay in Salasar today? You can ask about our Deluxe Room (from ₹1,499/night at SBM Hotel 1), Super Deluxe Room (₹1,999/night inclusive of GST), Family Suite (from ₹2,999/night), temple distance, or check room availability for your dates.`;
+        replyText = 'Welcome to SBM Hotel & SBM 2 Guest House! I am SBM Concierge. How may I assist you with your stay in Salasar today? You can ask about our room categories, current admin-configured tariffs, temple distance, or check room availability for your dates.';
       }
 
       res.json({
@@ -2134,10 +2161,10 @@ const requestedPrice =
 
 if (
   requestedPrice !== undefined &&
-  (!Number.isFinite(requestedPrice) || requestedPrice < 0)
+  (!Number.isFinite(requestedPrice) || requestedPrice <= 0)
 ) {
   return res.status(400).json({
-    error: 'Invalid room price.'
+    error: 'Room price must be greater than ₹0. Set a positive admin-configured tariff before saving.'
   });
 }
 
@@ -3751,6 +3778,10 @@ res.json({
       }
 
       if (!sampleBooking) {
+        const sampleRoomRate = Number(
+          db.getRoomTypes('sbm-hotel').find(room => room.room_code === 'deluxe')?.price_per_night
+        ) || 0;
+        const sampleTax = Math.round(sampleRoomRate * ((Number(db.getSettings().gst_percent) || 12) / 100));
         sampleBooking = {
           id: 'test-bk-101',
           booking_number: 'SBM-2026-TEST',
@@ -3769,11 +3800,11 @@ res.json({
           check_in: new Date().toISOString().split('T')[0],
           check_out: new Date(Date.now() + 86400000).toISOString().split('T')[0],
           nights: 1,
-          price_per_night: 1499,
-          room_subtotal: 1499,
-          tax_amount: 180,
-          total_amount: 1679,
-          paid_amount: 1679,
+          price_per_night: sampleRoomRate,
+          room_subtotal: sampleRoomRate,
+          tax_amount: sampleTax,
+          total_amount: sampleRoomRate + sampleTax,
+          paid_amount: sampleRoomRate + sampleTax,
           outstanding_amount: 0,
           payment_status: 'Completed',
           booking_status: 'Confirmed',

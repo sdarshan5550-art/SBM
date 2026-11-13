@@ -46,6 +46,7 @@ export async function initializePostgres(): Promise<boolean> {
 
       // Run Initial JSON Seed / Data Migration if tables are empty
       await runDataMigrationFromJSON(client);
+      await runLegacyRoomPricingMigration(client);
     } finally {
       client.release();
     }
@@ -249,7 +250,7 @@ if (!fs.existsSync(jsonPath)) return;
           b.rooms_requested || 1,
           b.nights || 1,
           b.booking_status || 'Confirmed',
-          b.price_per_night || 2500,
+          Number(b.price_per_night) || 0,
           b.room_subtotal || b.total_amount,
           b.tax_amount || 0,
           b.total_amount,
@@ -273,7 +274,7 @@ if (!fs.existsSync(jsonPath)) return;
           b.room_number || null,
           b.check_in,
           b.check_out,
-          b.price_per_night || 2500,
+          Number(b.price_per_night) || 0,
           b.nights || 1,
           b.booking_status === 'Cancelled' ? 'CANCELLED' : (b.booking_status === 'Checked In' ? 'CHECKED_IN' : 'ACTIVE')
         ]);
@@ -673,6 +674,67 @@ if (!fs.existsSync(jsonPath)) return;
   }
 }
 
+async function runLegacyRoomPricingMigration(client: PoolClient) {
+  const migrationName = 'admin_only_room_pricing_v1';
+  try {
+    await client.query('BEGIN');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_migrations (
+        name VARCHAR(128) PRIMARY KEY,
+        applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const alreadyApplied = await client.query(
+      'SELECT name FROM app_migrations WHERE name = $1 FOR UPDATE',
+      [migrationName]
+    );
+    if (alreadyApplied.rows.length > 0) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    // Clear only the known historical seed tariffs. Other category prices are retained.
+    const cleared = await client.query(`
+      UPDATE room_types
+      SET price_per_night = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE
+        (property_code = 'sbm-hotel' AND room_code = 'deluxe' AND price_per_night = 1499) OR
+        (property_code = 'sbm-hotel' AND room_code = 'super-deluxe' AND price_per_night = 1999) OR
+        (property_code = 'sbm-hotel' AND room_code = 'family' AND price_per_night = 2999) OR
+        (property_code = 'sbm-guest-house' AND room_code = 'deluxe' AND price_per_night = 2500) OR
+        (property_code = 'sbm-guest-house' AND room_code = 'family' AND price_per_night = 3500)
+      RETURNING id
+    `);
+    const clearedIds = cleared.rows.map((row: { id: string }) => row.id);
+
+    if (clearedIds.length > 0) {
+      await client.query(`
+        UPDATE rooms
+        SET price = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE room_type_id = ANY($1::varchar[])
+      `, [clearedIds]);
+
+      await client.query(`
+        UPDATE rate_plans
+        SET base_price = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE room_type_id = ANY($1::varchar[])
+      `, [clearedIds]);
+    }
+
+    await client.query(
+      'INSERT INTO app_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+      [migrationName]
+    );
+    await client.query('COMMIT');
+    console.log(`[SBM PRICING] PostgreSQL legacy tariffs cleared for ${clearedIds.length} room categories; other saved rates retained.`);
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('[SBM PRICING] PostgreSQL legacy pricing migration failed:', err.message);
+    throw err;
+  }
+}
+
 export async function updateRoomTypePriceInPostgres(
   roomTypeId: string,
   newPrice: number
@@ -1052,7 +1114,7 @@ export async function postgresSavePMSRatePlan(plan: any): Promise<any> {
     plan.name,
     plan.code,
     plan.meal_plan || 'EP',
-    plan.base_price || 2500,
+    Number(plan.base_price) > 0 ? Number(plan.base_price) : 0,
     plan.cancellation_policy || 'MODERATE',
     plan.active !== undefined ? plan.active : true
   ]);
@@ -1802,10 +1864,20 @@ export async function postgresCreateReservation(input: any): Promise<any> {
     const reservationId = input.id || `bkg-${Date.now()}-${Math.random().toString(36).substring(7)}`;
     const bookingNumber = input.booking_number || `SBM-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`;
     const nights = Math.max(1, Math.ceil((new Date(checkOut).getTime() - new Date(checkIn).getTime()) / (1000 * 60 * 60 * 24)));
-    const pricePerNight = input.price_per_night || roomType.price_per_night || 2500;
-    const subtotal = input.room_subtotal || (pricePerNight * nights * roomsRequested);
-    const tax = input.tax_amount || (subtotal * 0.12);
-    const totalAmount = input.total_amount || (subtotal + tax);
+    const pricePerNight = Number(roomType.price_per_night);
+    if (!Number.isFinite(pricePerNight) || pricePerNight <= 0) {
+      throw new Error('This room has no admin-configured price yet. Please set its tariff in the Admin Panel before booking.');
+    }
+    const grossAmount = pricePerNight * nights * roomsRequested;
+    const taxRate = (Number(roomType.tax_percent) || 12) / 100;
+    // Match the existing category tax treatment: Super Deluxe is GST-inclusive;
+    // other categories are GST-exclusive unless the schema is extended to store this flag.
+    const isTaxInclusive = roomType.room_code === 'super-deluxe';
+    const tax = isTaxInclusive
+      ? Math.round(grossAmount - (grossAmount / (1 + taxRate)))
+      : Math.round(grossAmount * taxRate);
+    const subtotal = isTaxInclusive ? grossAmount - tax : grossAmount;
+    const totalAmount = isTaxInclusive ? grossAmount : grossAmount + tax;
 
     await client.query(`
       INSERT INTO reservations (id, booking_number, property_id, property_code, property_name, guest_id, guest_name, guest_phone, guest_email, source, source_booking_id, room_type_id, room_name, room_number, check_in, check_out, adults, children, rooms_count, nights, status, price_per_night, subtotal, tax, total_amount, payment_status, payment_method, special_requests, internal_notes, created_by, created_at, updated_at)

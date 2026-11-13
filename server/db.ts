@@ -78,22 +78,6 @@ export const CATEGORY_ORDER: Record<string, number> = {
   'family': 3
 };
 
-export const getDefaultRoomPrice = (propertyCode?: string, roomCode?: string): number => {
-  const normProp = (propertyCode || 'sbm-hotel').toLowerCase();
-  const normRoom = (roomCode || 'deluxe').toLowerCase();
-  
-  if (normProp === 'sbm-hotel' || normProp === 'prop-sbm-hotel') {
-    if (normRoom === 'deluxe') return 1499;
-    if (normRoom === 'super-deluxe') return 1999;
-    if (normRoom === 'family') return 2999;
-    return 1499;
-  }
-  // SBM Guest House default pricing remains untouched
-  if (normRoom === 'deluxe') return 2500;
-  if (normRoom === 'family') return 3500;
-  return 2500;
-};
-
 interface DatabaseData {
   properties: Property[];
   room_types: RoomType[];
@@ -123,6 +107,7 @@ interface DatabaseData {
   property_gateway_configs?: Record<string, any>;
   payment_transactions?: PaymentTransactionRecord[];
   combined_booking_groups?: CombinedBookingGroup[];
+  room_pricing_admin_only_migrated?: boolean;
 }
 
 const currentFilename = typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url);
@@ -221,7 +206,7 @@ function getInitialData(): DatabaseData {
         'Daily Housekeeping',
         'Tea/Coffee Maker'
       ],
-      price_per_night: 1499,
+      price_per_night: 0,
       tax_percent: 12,
       total_rooms: 10,
       images: ROOM_PHOTOS.sbmDeluxe,
@@ -246,7 +231,7 @@ function getInitialData(): DatabaseData {
         'Hand Soap',
         'Moisturizer'
       ],
-      price_per_night: 1999,
+      price_per_night: 0,
       tax_percent: 12,
       is_tax_inclusive: true,
       total_rooms: 0,
@@ -271,7 +256,7 @@ function getInitialData(): DatabaseData {
         'Daily Housekeeping',
         '24/7 Room Service'
       ],
-      price_per_night: 2999,
+      price_per_night: 0,
       tax_percent: 12,
       total_rooms: 5,
       images: ROOM_PHOTOS.sbmFamily,
@@ -294,7 +279,7 @@ function getInitialData(): DatabaseData {
         'Wi-Fi',
         'Room Service'
       ],
-      price_per_night: 2500,
+      price_per_night: 0,
       tax_percent: 12,
       total_rooms: 8,
       images: ROOM_PHOTOS.ghDeluxe,
@@ -317,7 +302,7 @@ function getInitialData(): DatabaseData {
         'Wi-Fi',
         'Power Backup'
       ],
-      price_per_night: 3500,
+      price_per_night: 0,
       tax_percent: 12,
       total_rooms: 4,
       images: ROOM_PHOTOS.ghFamily,
@@ -346,7 +331,7 @@ function getInitialData(): DatabaseData {
       id: 'kb-3',
       category: 'Room information',
       title: 'Room Types & Pricing',
-      content: 'We offer strictly two official room categories: Deluxe Room at ₹2,500/night (suitable for up to 2 guests with 1 King/Double bed) and Family Suite at ₹3,500/night (suitable for 4-5 guests with 2 Double beds). All prices exclude applicable GST (12%).',
+      content: 'Room categories, availability, and current tariffs are managed by the hotel administration. Guests should refer to the live booking page for the current admin-configured price and applicable taxes.',
       updated_at: now
     },
     {
@@ -1138,7 +1123,7 @@ class DatabaseService {
                 'Hand Soap',
                 'Moisturizer'
               ],
-              price_per_night: 1999,
+              price_per_night: 0,
               tax_percent: 12,
               is_tax_inclusive: true,
               total_rooms: 0,
@@ -1152,25 +1137,10 @@ class DatabaseService {
             }
           }
 
-          // Migrate SBM Hotel 1 default room prices (SBM Hotel 1 only; SBM Guest House untouched)
-          for (const rt of parsed.room_types) {
-            if (rt.property_code === 'sbm-hotel' || rt.property_id === 'prop-sbm-hotel') {
-              if (rt.room_code === 'deluxe' && (rt.price_per_night === 2500 || !rt.price_per_night)) {
-                rt.price_per_night = 1499;
-              } else if (rt.room_code === 'family' && (rt.price_per_night === 3500 || !rt.price_per_night)) {
-                rt.price_per_night = 2999;
-              } else if (rt.room_code === 'super-deluxe' && (!rt.price_per_night || rt.price_per_night === 0)) {
-                rt.price_per_night = 1999;
-              }
-            }
-          }
         }
 
         if (Array.isArray(parsed.physical_rooms)) {
           for (const room of parsed.physical_rooms) {
-            if (room.price === undefined) {
-              room.price = getDefaultRoomPrice(room.property_code, room.room_code);
-            }
             if (!room.facilities) {
               room.facilities = ['Wi-Fi', 'Air Conditioning'];
             }
@@ -1185,6 +1155,51 @@ class DatabaseService {
         }
         if (!parsed.combined_booking_groups) {
           parsed.combined_booking_groups = [];
+        }
+
+        // One-time migration: clear only the known historical seed tariffs.
+        // Any different value already saved by an admin is retained.
+        if (!parsed.room_pricing_admin_only_migrated) {
+          const legacySeedPrices: Record<string, number> = {
+            'sbm-hotel:deluxe': 1499,
+            'sbm-hotel:super-deluxe': 1999,
+            'sbm-hotel:family': 2999,
+            'sbm-guest-house:deluxe': 2500,
+            'sbm-guest-house:family': 3500
+          };
+          for (const roomType of parsed.room_types || []) {
+            const key = `${roomType.property_code}:${roomType.room_code}`;
+            if (legacySeedPrices[key] !== undefined &&
+                Number(roomType.price_per_night) === legacySeedPrices[key]) {
+              roomType.price_per_night = 0;
+            }
+          }
+
+          // Keep physical-room admin displays aligned with the authoritative category tariff.
+          for (const physicalRoom of parsed.physical_rooms || []) {
+            const parentRoomType = (parsed.room_types || []).find(roomType =>
+              roomType.id === physicalRoom.room_type_id ||
+              (roomType.property_code === physicalRoom.property_code &&
+               roomType.room_code === physicalRoom.room_code)
+            );
+            if (parentRoomType) {
+              const configuredPrice = Number(parentRoomType.price_per_night);
+              physicalRoom.price = Number.isFinite(configuredPrice) && configuredPrice > 0
+                ? configuredPrice
+                : 0;
+            }
+          }
+          // Remove the old seeded tariff text from the default concierge knowledge item.
+          for (const item of parsed.knowledge_base || []) {
+            if (item.title === 'Room Types & Pricing' &&
+                /₹\s*(1,?499|1,?999|2,?999|2,?500|3,?500)/.test(item.content || '')) {
+              item.content = 'Room categories, availability, and current tariffs are managed by the hotel administration. Guests should refer to the live booking page for the current admin-configured price and applicable taxes.';
+            }
+          }
+
+          parsed.room_pricing_admin_only_migrated = true;
+          this.saveDataDirect(parsed);
+          console.log('[SBM PRICING] Legacy default tariffs cleared; admin-set prices retained.');
         }
 
         return parsed;
@@ -1244,6 +1259,14 @@ class DatabaseService {
   }
 
   public updateRoomType(id: string, updates: Partial<RoomType>): RoomType {
+    if (updates.price_per_night !== undefined) {
+      const adminPrice = Number(updates.price_per_night);
+      if (!Number.isFinite(adminPrice) || adminPrice < 0) {
+        throw new Error('Room price must be ₹0 (not configured) or a valid positive admin-set amount.');
+      }
+      updates.price_per_night = adminPrice;
+    }
+
     const idx = this.data.room_types.findIndex(r => r.id === id);
     if (idx === -1) throw new Error('Room type not found');
 
@@ -1321,6 +1344,23 @@ class DatabaseService {
     for (const room of targetRooms) {
       const property = this.data.properties.find(p => p.id === room.property_id || p.code === room.property_code);
       if (!property) continue;
+
+      const adminPrice = Number(room.price_per_night);
+      if (!Number.isFinite(adminPrice) || adminPrice <= 0) {
+        results.push({
+          property,
+          roomType: room,
+          availableRooms: 0,
+          totalRooms: room.total_rooms,
+          isAvailable: false,
+          nights,
+          pricePerNight: 0,
+          subtotal: 0,
+          taxAmount: 0,
+          totalAmount: 0
+        });
+        continue;
+      }
 
       const roomBookings = validBookings.filter(b => b.room_type_id === room.id);
       const roomBlocks = validBlocks.filter(blk => blk.room_type_id === room.id);
@@ -1465,6 +1505,43 @@ class DatabaseService {
 
     if (!targetRes || targetRes.availableRooms < bookingData.rooms_requested) {
       throw new Error(`Sorry, only ${targetRes ? targetRes.availableRooms : 0} room(s) available for the selected dates.`);
+    }
+    if (!Number.isFinite(Number(targetRes.pricePerNight)) || Number(targetRes.pricePerNight) <= 0) {
+      throw new Error('This room has no admin-configured price yet. Please contact the hotel.');
+    }
+
+    // Never trust a price or total supplied by the browser. Recalculate from the current
+    // server-side room category tariff and revalidate any coupon against that amount.
+    bookingData.price_per_night = targetRes.pricePerNight;
+    bookingData.room_subtotal = targetRes.subtotal;
+    bookingData.discount_amount = 0;
+    bookingData.tax_amount = targetRes.taxAmount;
+    bookingData.total_amount = targetRes.totalAmount;
+
+    if (bookingData.coupon_code) {
+      const couponResult = this.validateCoupon({
+        code: bookingData.coupon_code,
+        roomId: bookingData.room_type_id,
+        bookingAmount: targetRes.subtotal,
+        guestEmail: cleanEmail,
+        guestPhone: cleanPhone
+      });
+      if (!couponResult.valid) {
+        throw new Error(couponResult.error || 'Coupon is no longer valid. Please remove it and try again.');
+      }
+      bookingData.discount_amount = couponResult.discountAmount;
+      const gstRate = (targetRes.roomType.tax_percent ?? this.data.settings.gst_percent ?? 12) / 100;
+      const isTaxInclusive = targetRes.roomType.is_tax_inclusive || targetRes.roomType.room_code === 'super-deluxe';
+      if (isTaxInclusive) {
+        bookingData.total_amount = Math.max(0, targetRes.totalAmount - couponResult.discountAmount);
+        bookingData.tax_amount = Math.round(
+          bookingData.total_amount - (bookingData.total_amount / (1 + gstRate))
+        );
+      } else {
+        const discountedSubtotal = Math.max(0, targetRes.subtotal - couponResult.discountAmount);
+        bookingData.tax_amount = Math.round(discountedSubtotal * gstRate);
+        bookingData.total_amount = discountedSubtotal + bookingData.tax_amount;
+      }
     }
 
     const randomSuffix = Math.floor(100000 + Math.random() * 900000);
@@ -1848,72 +1925,52 @@ class DatabaseService {
     const idx = this.data.physical_rooms.findIndex(r => r.id === id);
     if (idx === -1) throw new Error('Physical room not found.');
 
-    const updated = {
-      ...this.data.physical_rooms[idx],
+    const currentRoom = this.data.physical_rooms[idx];
+    let parentRoomType: RoomType | undefined;
+    let newPrice: number | undefined;
+
+    if (updates.price !== undefined) {
+      newPrice = Number(updates.price);
+      if (!Number.isFinite(newPrice) || newPrice <= 0) {
+        throw new Error('Please enter a valid admin-set room price greater than ₹0.');
+      }
+
+      const candidate = {
+        ...currentRoom,
+        ...updates
+      };
+      parentRoomType = this.data.room_types?.find(
+        rt => rt.id === candidate.room_type_id ||
+          (rt.property_code === candidate.property_code && rt.room_code === candidate.room_code)
+      );
+      if (!parentRoomType) {
+        throw new Error(`Room type not found for physical room ${id}.`);
+      }
+    }
+
+    const updated: PhysicalRoom = {
+      ...currentRoom,
       ...updates,
       updated_at: new Date().toISOString()
     };
     this.data.physical_rooms[idx] = updated;
 
-    // PRICE SYNC: room_types.price_per_night is the single source of truth
-if (updates.price !== undefined) {
-  const newPrice = Number(updates.price);
-
-  if (!Number.isFinite(newPrice) || newPrice < 0) {
-    throw new Error('Invalid room price.');
-  }
-
-  // Find the parent room type
-  const parentRoomType = this.data.room_types?.find(
-    rt =>
-      rt.id === updated.room_type_id ||
-      (
-        rt.property_code === updated.property_code &&
-        rt.room_code === updated.room_code
-      )
-  );
-
-  if (!parentRoomType) {
-    throw new Error(
-      `Room type not found for physical room ${updated.id}.`
-    );
-  }
-
-  // IMPORTANT:
-  // Public website, availability and booking all read this value.
-  parentRoomType.price_per_night = newPrice;
-
-  // Update ALL physical rooms belonging to the same room category.
-  if (this.data.physical_rooms) {
-    for (const room of this.data.physical_rooms) {
-      if (
-        room.room_type_id === parentRoomType.id ||
-        (
-          room.property_code === parentRoomType.property_code &&
-          room.room_code === parentRoomType.room_code
-        )
-      ) {
-        room.price = newPrice;
-        room.updated_at = new Date().toISOString();
+    // The room-category tariff is authoritative for public listings and all bookings.
+    if (parentRoomType && newPrice !== undefined) {
+      parentRoomType.price_per_night = newPrice;
+      for (const room of this.data.physical_rooms) {
+        if (room.room_type_id === parentRoomType.id ||
+            (room.property_code === parentRoomType.property_code && room.room_code === parentRoomType.room_code)) {
+          room.price = newPrice;
+          room.updated_at = new Date().toISOString();
+        }
       }
+
+      updateRoomTypePriceInPostgres(parentRoomType.id, newPrice).catch(err => {
+        console.error('[PRICE SYNC] PostgreSQL synchronization failed:', err);
+      });
+      console.log(`[PRICE SYNC] ${parentRoomType.name} (${parentRoomType.id}) = ₹${newPrice}`);
     }
-  }
-
-  // PostgreSQL synchronization
-  updateRoomTypePriceInPostgres(
-    parentRoomType.id,
-    newPrice
-  ).catch(err => {
-    console.error(
-      '[PRICE SYNC] PostgreSQL synchronization failed:',
-      err
-    );
-  });
-
-  console.log(
-    `[PRICE SYNC] ${parentRoomType.name} (${parentRoomType.id}) = ₹${newPrice}`
-  );
-}
 
     this.save();
     return updated;
@@ -1929,15 +1986,43 @@ if (updates.price !== undefined) {
       throw new Error(`Room number ${roomData.room_number} already exists in ${roomData.property_name || roomData.property_code}.`);
     }
 
+    const adminPrice = Number(roomData.price);
+    if (!Number.isFinite(adminPrice) || adminPrice <= 0) {
+      throw new Error('Please enter an admin-set room price greater than ₹0 before creating this room.');
+    }
+
+    const parentRoomType = this.data.room_types.find(
+      rt => rt.id === roomData.room_type_id ||
+        (rt.property_code === roomData.property_code && rt.room_code === roomData.room_code)
+    );
+    if (!parentRoomType) {
+      throw new Error('Room category not found. Please select a valid room category.');
+    }
+
     const newRoom: PhysicalRoom = {
       ...roomData,
       room_number: roomData.room_number.trim(),
-      price: roomData.price !== undefined ? Number(roomData.price) : getDefaultRoomPrice(roomData.property_code, roomData.room_code),
+      price: adminPrice,
       facilities: roomData.facilities || ['Wi-Fi', 'Air Conditioning'],
       id: `rm-${roomData.property_code}-${roomData.room_number.trim()}`,
       updated_at: new Date().toISOString()
     };
+
+    // Category tariff is the single source of truth for public listings and bookings.
+    parentRoomType.price_per_night = adminPrice;
+    (parentRoomType as any).updated_at = new Date().toISOString();
+    for (const physicalRoom of this.data.physical_rooms) {
+      if (physicalRoom.room_type_id === parentRoomType.id ||
+        (physicalRoom.property_code === parentRoomType.property_code && physicalRoom.room_code === parentRoomType.room_code)) {
+        physicalRoom.price = adminPrice;
+        physicalRoom.updated_at = new Date().toISOString();
+      }
+    }
+
     this.data.physical_rooms.push(newRoom);
+    updateRoomTypePriceInPostgres(parentRoomType.id, adminPrice).catch(err =>
+      console.error('[PRICE SYNC] PostgreSQL synchronization failed:', err)
+    );
     this.syncRoomCounts();
     this.save();
     return newRoom;
