@@ -1189,6 +1189,14 @@ class DatabaseService {
                 : 0;
             }
           }
+          // Remove the old seeded tariff text from the default concierge knowledge item.
+          for (const item of parsed.knowledge_base || []) {
+            if (item.title === 'Room Types & Pricing' &&
+                /₹\s*(1,?499|1,?999|2,?999|2,?500|3,?500)/.test(item.content || '')) {
+              item.content = 'Room categories, availability, and current tariffs are managed by the hotel administration. Guests should refer to the live booking page for the current admin-configured price and applicable taxes.';
+            }
+          }
+
           parsed.room_pricing_admin_only_migrated = true;
           this.saveDataDirect(parsed);
           console.log('[SBM PRICING] Legacy default tariffs cleared; admin-set prices retained.');
