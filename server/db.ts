@@ -1893,72 +1893,52 @@ class DatabaseService {
     const idx = this.data.physical_rooms.findIndex(r => r.id === id);
     if (idx === -1) throw new Error('Physical room not found.');
 
-    const updated = {
-      ...this.data.physical_rooms[idx],
+    const currentRoom = this.data.physical_rooms[idx];
+    let parentRoomType: RoomType | undefined;
+    let newPrice: number | undefined;
+
+    if (updates.price !== undefined) {
+      newPrice = Number(updates.price);
+      if (!Number.isFinite(newPrice) || newPrice <= 0) {
+        throw new Error('Please enter a valid admin-set room price greater than ₹0.');
+      }
+
+      const candidate = {
+        ...currentRoom,
+        ...updates
+      };
+      parentRoomType = this.data.room_types?.find(
+        rt => rt.id === candidate.room_type_id ||
+          (rt.property_code === candidate.property_code && rt.room_code === candidate.room_code)
+      );
+      if (!parentRoomType) {
+        throw new Error(`Room type not found for physical room ${id}.`);
+      }
+    }
+
+    const updated: PhysicalRoom = {
+      ...currentRoom,
       ...updates,
       updated_at: new Date().toISOString()
     };
     this.data.physical_rooms[idx] = updated;
 
-    // PRICE SYNC: room_types.price_per_night is the single source of truth
-if (updates.price !== undefined) {
-  const newPrice = Number(updates.price);
-
-  if (!Number.isFinite(newPrice) || newPrice <= 0) {
-    throw new Error('Please enter a valid admin-set room price greater than ₹0.');
-  }
-
-  // Find the parent room type
-  const parentRoomType = this.data.room_types?.find(
-    rt =>
-      rt.id === updated.room_type_id ||
-      (
-        rt.property_code === updated.property_code &&
-        rt.room_code === updated.room_code
-      )
-  );
-
-  if (!parentRoomType) {
-    throw new Error(
-      `Room type not found for physical room ${updated.id}.`
-    );
-  }
-
-  // IMPORTANT:
-  // Public website, availability and booking all read this value.
-  parentRoomType.price_per_night = newPrice;
-
-  // Update ALL physical rooms belonging to the same room category.
-  if (this.data.physical_rooms) {
-    for (const room of this.data.physical_rooms) {
-      if (
-        room.room_type_id === parentRoomType.id ||
-        (
-          room.property_code === parentRoomType.property_code &&
-          room.room_code === parentRoomType.room_code
-        )
-      ) {
-        room.price = newPrice;
-        room.updated_at = new Date().toISOString();
+    // The room-category tariff is authoritative for public listings and all bookings.
+    if (parentRoomType && newPrice !== undefined) {
+      parentRoomType.price_per_night = newPrice;
+      for (const room of this.data.physical_rooms) {
+        if (room.room_type_id === parentRoomType.id ||
+            (room.property_code === parentRoomType.property_code && room.room_code === parentRoomType.room_code)) {
+          room.price = newPrice;
+          room.updated_at = new Date().toISOString();
+        }
       }
+
+      updateRoomTypePriceInPostgres(parentRoomType.id, newPrice).catch(err => {
+        console.error('[PRICE SYNC] PostgreSQL synchronization failed:', err);
+      });
+      console.log(`[PRICE SYNC] ${parentRoomType.name} (${parentRoomType.id}) = ₹${newPrice}`);
     }
-  }
-
-  // PostgreSQL synchronization
-  updateRoomTypePriceInPostgres(
-    parentRoomType.id,
-    newPrice
-  ).catch(err => {
-    console.error(
-      '[PRICE SYNC] PostgreSQL synchronization failed:',
-      err
-    );
-  });
-
-  console.log(
-    `[PRICE SYNC] ${parentRoomType.name} (${parentRoomType.id}) = ₹${newPrice}`
-  );
-}
 
     this.save();
     return updated;
