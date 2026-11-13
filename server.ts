@@ -2275,7 +2275,8 @@ res.json({
           await postgresCreateBlockedRoom(created);
         } catch (pgError: any) {
           console.error('[Blocked Rooms] PostgreSQL write failed:', pgError.message);
-          return res.status(500).json({ error: 'Room block was saved locally but could not be synchronized to PostgreSQL. Please retry after checking the database.' });
+          db.deleteBlockedRoom(created.id);
+          return res.status(500).json({ error: 'Room block could not be saved to PostgreSQL. No local block was retained; please retry after checking the database.' });
         }
       }
       res.status(201).json(created);
