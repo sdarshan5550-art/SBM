@@ -20,7 +20,11 @@ import {
   postgresUpdateCoupon,
   postgresDeleteCoupon,
   postgresRecordCouponUsage,
-  postgresGetCouponUsage
+  postgresGetCouponUsage,
+  postgresUpdateGstPercent,
+  postgresGetBlockedRooms,
+  postgresCreateBlockedRoom,
+  postgresDeleteBlockedRoom
 } from './server/db/postgres';
 import { reservationService } from './server/services/reservationService';
 import { inventoryService } from './server/services/inventoryService';
@@ -2224,28 +2228,73 @@ res.json({
   });
 
   // Admin Blocked Rooms
-  app.get('/api/admin/blocked-rooms', authenticateAdmin, (req, res) => {
+  app.get('/api/admin/blocked-rooms', authenticateAdmin, async (req, res) => {
     try {
-      const blocked = db.getBlockedRooms();
-      res.json(blocked);
+      const jsonBlocks = db.getBlockedRooms();
+      if (isPostgresAvailable()) {
+        try {
+          const pgBlocks = await postgresGetBlockedRooms();
+          const byId = new Map<string, any>();
+          [...jsonBlocks, ...pgBlocks].forEach(block => byId.set(block.id, block));
+          return res.json([...byId.values()]);
+        } catch (pgError: any) {
+          console.error('[Blocked Rooms] PostgreSQL read failed; using JSON store:', pgError.message);
+        }
+      }
+      res.json(jsonBlocks);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post('/api/admin/blocked-rooms', authenticateAdmin, (req, res) => {
+  app.post('/api/admin/blocked-rooms', authenticateAdmin, async (req, res) => {
     try {
-      const created = db.createBlockedRoom(req.body);
+      const block = req.body || {};
+      if (!block.property_code || !block.room_type_id || !block.start_date || !block.end_date) {
+        return res.status(400).json({ error: 'Property, room category, start date and end date are required.' });
+      }
+      if (String(block.start_date) >= String(block.end_date)) {
+        return res.status(400).json({ error: 'End date must be after the exclusive end boundary.' });
+      }
+      const room = db.getRoomTypes(block.property_code).find(r => r.id === block.room_type_id);
+      if (!room) return res.status(400).json({ error: 'Selected room category does not belong to this property.' });
+      const quantity = Number(block.quantity || 1);
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > Number(room.total_rooms || 0)) {
+        return res.status(400).json({ error: 'Blocked quantity must be between 1 and the category room count.' });
+      }
+      const created = db.createBlockedRoom({
+        ...block,
+        property_id: room.property_id,
+        room_code: room.room_code,
+        quantity
+      });
+      if (isPostgresAvailable()) {
+        try {
+          await postgresCreateBlockedRoom(created);
+        } catch (pgError: any) {
+          console.error('[Blocked Rooms] PostgreSQL write failed:', pgError.message);
+          return res.status(500).json({ error: 'Room block was saved locally but could not be synchronized to PostgreSQL. Please retry after checking the database.' });
+        }
+      }
       res.status(201).json(created);
     } catch (err: any) {
       res.status(400).json({ error: err.message });
     }
   });
 
-  app.delete('/api/admin/blocked-rooms/:id', authenticateAdmin, (req, res) => {
+  app.delete('/api/admin/blocked-rooms/:id', authenticateAdmin, async (req, res) => {
     try {
-      const deleted = db.deleteBlockedRoom(req.params.id);
-      if (!deleted) return res.status(404).json({ error: 'Blocked room record not found.' });
+      const deletedJson = db.deleteBlockedRoom(req.params.id);
+      let deletedPostgres = false;
+      if (isPostgresAvailable()) {
+        try {
+          deletedPostgres = await postgresDeleteBlockedRoom(req.params.id);
+        } catch (pgError: any) {
+          console.error('[Blocked Rooms] PostgreSQL delete failed:', pgError.message);
+          return res.status(500).json({ error: 'Could not synchronize room-block removal to PostgreSQL.' });
+        }
+      }
+      if (!deletedJson && !deletedPostgres) return res.status(404).json({ error: 'Blocked room record not found.' });
       res.json({ success: true });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -2303,6 +2352,14 @@ res.json({
   app.put('/api/admin/settings', authenticateAdmin, async (req, res) => {
     try {
       const updated = db.updateSettings(req.body);
+      if (isPostgresAvailable() && req.body.gst_percent !== undefined) {
+        try {
+          updated.gst_percent = await postgresUpdateGstPercent(Number(req.body.gst_percent));
+        } catch (pgError: any) {
+          console.error('[Settings] Error saving GST percentage to PostgreSQL:', pgError.message);
+          return res.status(500).json({ error: 'Settings were saved locally, but GST could not be synchronized to PostgreSQL.' });
+        }
+      }
       if (isPostgresAvailable() && req.body.social_media) {
         try {
           const pgSocial = await postgresUpdateSocialMediaSettings(req.body.social_media);
