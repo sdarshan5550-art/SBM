@@ -34,9 +34,9 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
   const superDeluxeRoom = roomTypes.find(r => r.property_code === 'sbm-hotel' && r.room_code === 'super-deluxe');
   const familyRoom = roomTypes.find(r => r.property_code === 'sbm-hotel' && r.room_code === 'family');
 
-  const deluxePrice = deluxeRoom?.price_per_night ?? 1499;
-  const superDeluxePrice = superDeluxeRoom?.price_per_night ?? 1999;
-  const familyPrice = familyRoom?.price_per_night ?? 2999;
+  const deluxePrice = Number(deluxeRoom?.price_per_night) > 0 ? Number(deluxeRoom?.price_per_night) : null;
+  const superDeluxePrice = Number(superDeluxeRoom?.price_per_night) > 0 ? Number(superDeluxeRoom?.price_per_night) : null;
+  const familyPrice = Number(familyRoom?.price_per_night) > 0 ? Number(familyRoom?.price_per_night) : null;
 
   // Filter SBM Hotel categories in strict canonical order: 1. Deluxe, 2. Super Deluxe, 3. Family Suite
   const sbmRooms = roomTypes
@@ -52,7 +52,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
         </h1>
         <div className="w-12 h-0.5 bg-[#C5A059] mx-auto my-3" />
         <p className="text-xs sm:text-sm text-[#666666] leading-relaxed">
-          We offer three distinct room categories designed for your comfort and spiritual pilgrimage in Salasar: <strong className="text-[#1A1A1A]">Deluxe Room</strong> (₹{deluxePrice.toLocaleString('en-IN')}/night), <strong className="text-[#1A1A1A]">Super Deluxe Room</strong> (₹{superDeluxePrice.toLocaleString('en-IN')}/night inclusive of GST), and <strong className="text-[#1A1A1A]">Family Suite</strong> (₹{familyPrice.toLocaleString('en-IN')}/night).
+          We offer three distinct room categories designed for your comfort and spiritual pilgrimage in Salasar: <strong className="text-[#1A1A1A]">Deluxe Room</strong> ({deluxePrice === null ? 'Price not configured' : `₹${deluxePrice.toLocaleString('en-IN')}/night`}), <strong className="text-[#1A1A1A]">Super Deluxe Room</strong> ({superDeluxePrice === null ? 'Price not configured' : `₹${superDeluxePrice.toLocaleString('en-IN')}/night`} inclusive of GST), and <strong className="text-[#1A1A1A]">Family Suite</strong> ({familyPrice === null ? 'Price not configured' : `₹${familyPrice.toLocaleString('en-IN')}/night`}).
         </p>
       </div>
 
@@ -85,7 +85,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
                 Deluxe Room
               </div>
               <div className="text-sm font-serif font-bold text-[#C5A059]">
-                ₹{deluxePrice.toLocaleString('en-IN')} <span className="text-[10px] text-stone-500 font-sans font-normal">/ night + GST</span>
+                {deluxePrice === null ? 'Price not configured' : `₹${deluxePrice.toLocaleString('en-IN')}`} <span className="text-[10px] text-stone-500 font-sans font-normal">/ night + GST</span>
               </div>
               <p className="text-[#666666] leading-relaxed pt-1">
                 Ideal for couples, solitary pilgrims, or business travelers seeking a comfortable and serene stay near Sri Salasar Balaji Temple.
@@ -122,7 +122,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
                 Super Deluxe Room
               </div>
               <div className="text-sm font-serif font-bold text-[#C5A059]">
-                ₹{superDeluxePrice.toLocaleString('en-IN')} <span className="text-[10px] text-stone-500 font-sans font-normal">/ night (inclusive of GST)</span>
+                {superDeluxePrice === null ? 'Price not configured' : `₹${superDeluxePrice.toLocaleString('en-IN')}`} <span className="text-[10px] text-stone-500 font-sans font-normal">/ night (inclusive of GST)</span>
               </div>
               <p className="text-[#666666] leading-relaxed pt-1">
                 Spacious room featuring 1 King Size Bed, dedicated in-room tea facilities, and refreshing bathroom amenities.
@@ -172,7 +172,7 @@ export const RoomsPage: React.FC<RoomsPageProps> = ({ onOpenBookingModal }) => {
                 Family Suite
               </div>
               <div className="text-sm font-serif font-bold text-[#C5A059]">
-                ₹{familyPrice.toLocaleString('en-IN')} <span className="text-[10px] text-stone-500 font-sans font-normal">/ night + GST</span>
+                {familyPrice === null ? 'Price not configured' : `₹${familyPrice.toLocaleString('en-IN')}`} <span className="text-[10px] text-stone-500 font-sans font-normal">/ night + GST</span>
               </div>
               <p className="text-[#666666] leading-relaxed pt-1">
                 Spacious layout designed for larger families, parents with children, or pilgrim groups traveling together to Salasar.
