@@ -1842,7 +1842,7 @@ CRITICAL MANDATES (DO NOT HALLUCINATE):
    - Recommend only room categories with a positive admin-configured price.
    - Quote the exact current price from roomTypesText; never invent or reuse a previous tariff.
    - For 3-5 guests or families, recommend a configured Family Suite only.
-7. Always maintain a warm, luxury, polite hospitality tone.
+8. Always maintain a warm, luxury, polite hospitality tone.
 
 OFFICIAL HOTEL KNOWLEDGE BASE:
 ${knowledgeText}
