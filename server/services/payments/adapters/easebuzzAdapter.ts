@@ -236,7 +236,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         );
 
         return {
-          order_id: txnid,
+          order_id: verifiedTxnId,
           provider: 'easebuzz',
           amount: params.amountInPaise,
           currency: 'INR',
@@ -320,7 +320,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       };
     }
 
-    const verifiedTxnId = payload?.txnid || verifiedTxnId;
+    const verifiedTxnId = payload?.txnid || txnid;
     if (!verifiedTxnId) {
       return {
         isValid: false,
@@ -361,7 +361,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         const txnData = resJson.data || resJson.msg;
         const status = (txnData.status || '').toLowerCase();
         const isSuccess = status === 'success';
-        const easepayid = txnData.easepayid || txnData.bank_ref_num || txnid;
+        const easepayid = txnData.easepayid || txnData.bank_ref_num || verifiedTxnId;
         const amount = txnData.amount ? parseFloat(txnData.amount) : undefined;
 
         return {
