@@ -2791,6 +2791,16 @@ export async function postgresGetCouponUsage(couponId: string): Promise<any[]> {
 
 
 
+// Read the configured global GST percentage from the authoritative settings row.
+export async function postgresGetGstPercent(): Promise<number> {
+  if (!pool) throw new Error('PostgreSQL not available');
+  const result = await pool.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
+  if (!result.rows.length) throw new Error('Hotel settings row is missing in PostgreSQL.');
+  const value = Number(result.rows[0].gst_percent);
+  if (!Number.isFinite(value) || value < 0 || value > 100) throw new Error('Stored GST percentage is invalid.');
+  return value;
+}
+
 // Admin-managed global GST setting. Keep PostgreSQL-backed PMS reservations in sync
 // with the same GST percentage used by the JSON-backed public booking engine.
 export async function postgresUpdateGstPercent(gstPercent: number): Promise<number> {
