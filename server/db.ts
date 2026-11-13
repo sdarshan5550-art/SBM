@@ -1251,6 +1251,14 @@ class DatabaseService {
   }
 
   public updateRoomType(id: string, updates: Partial<RoomType>): RoomType {
+    if (updates.price_per_night !== undefined) {
+      const adminPrice = Number(updates.price_per_night);
+      if (!Number.isFinite(adminPrice) || adminPrice < 0) {
+        throw new Error('Room price must be ₹0 (not configured) or a valid positive admin-set amount.');
+      }
+      updates.price_per_night = adminPrice;
+    }
+
     const idx = this.data.room_types.findIndex(r => r.id === id);
     if (idx === -1) throw new Error('Room type not found');
 
