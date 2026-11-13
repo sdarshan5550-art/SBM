@@ -107,6 +107,7 @@ interface DatabaseData {
   property_gateway_configs?: Record<string, any>;
   payment_transactions?: PaymentTransactionRecord[];
   combined_booking_groups?: CombinedBookingGroup[];
+  room_pricing_admin_only_migrated?: boolean;
 }
 
 const currentFilename = typeof __filename !== "undefined" ? __filename : fileURLToPath(import.meta.url);
@@ -330,7 +331,7 @@ function getInitialData(): DatabaseData {
       id: 'kb-3',
       category: 'Room information',
       title: 'Room Types & Pricing',
-      content: 'We offer strictly two official room categories: Deluxe Room at ₹2,500/night (suitable for up to 2 guests with 1 King/Double bed) and Family Suite at ₹3,500/night (suitable for 4-5 guests with 2 Double beds). All prices exclude applicable GST (12%).',
+      content: 'Room categories, availability, and current tariffs are managed by the hotel administration. Guests should refer to the live booking page for the current admin-configured price and applicable taxes.',
       updated_at: now
     },
     {
@@ -1154,6 +1155,37 @@ class DatabaseService {
         }
         if (!parsed.combined_booking_groups) {
           parsed.combined_booking_groups = [];
+        }
+
+        // One-time migration: clear only the known historical seed tariffs.
+        // Any different value already saved by an admin is retained.
+        if (!parsed.room_pricing_admin_only_migrated) {
+          const legacySeedPrices: Record<string, number> = {
+            'sbm-hotel:deluxe': 1499,
+            'sbm-hotel:super-deluxe': 1999,
+            'sbm-hotel:family': 2999,
+            'sbm-guest-house:deluxe': 2500,
+            'sbm-guest-house:family': 3500
+          };
+          for (const roomType of parsed.room_types || []) {
+            const key = `${roomType.property_code}:${roomType.room_code}`;
+            if (legacySeedPrices[key] !== undefined &&
+                Number(roomType.price_per_night) === legacySeedPrices[key]) {
+              roomType.price_per_night = 0;
+              for (const physicalRoom of parsed.physical_rooms || []) {
+                if (physicalRoom.room_type_id === roomType.id ||
+                    (physicalRoom.property_code === roomType.property_code &&
+                     physicalRoom.room_code === roomType.room_code)) {
+                  if (Number(physicalRoom.price) === legacySeedPrices[key]) {
+                    physicalRoom.price = 0;
+                  }
+                }
+              }
+            }
+          }
+          parsed.room_pricing_admin_only_migrated = true;
+          this.saveDataDirect(parsed);
+          console.log('[SBM PRICING] Legacy default tariffs cleared; admin-set prices retained.');
         }
 
         return parsed;
