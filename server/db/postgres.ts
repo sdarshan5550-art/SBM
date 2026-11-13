@@ -46,6 +46,7 @@ export async function initializePostgres(): Promise<boolean> {
 
       // Run Initial JSON Seed / Data Migration if tables are empty
       await runDataMigrationFromJSON(client);
+      await runLegacyRoomPricingMigration(client);
     } finally {
       client.release();
     }
@@ -670,6 +671,67 @@ if (!fs.existsSync(jsonPath)) return;
   } catch (err: any) {
     await client.query('ROLLBACK');
     console.error('❌ [SBM Hotel PMS Migration Failed]:', err.message);
+  }
+}
+
+async function runLegacyRoomPricingMigration(client: PoolClient) {
+  const migrationName = 'admin_only_room_pricing_v1';
+  try {
+    await client.query('BEGIN');
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_migrations (
+        name VARCHAR(128) PRIMARY KEY,
+        applied_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    const alreadyApplied = await client.query(
+      'SELECT name FROM app_migrations WHERE name = $1 FOR UPDATE',
+      [migrationName]
+    );
+    if (alreadyApplied.rows.length > 0) {
+      await client.query('COMMIT');
+      return;
+    }
+
+    // Clear only the known historical seed tariffs. Other category prices are retained.
+    const cleared = await client.query(`
+      UPDATE room_types
+      SET price_per_night = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE
+        (property_code = 'sbm-hotel' AND room_code = 'deluxe' AND price_per_night = 1499) OR
+        (property_code = 'sbm-hotel' AND room_code = 'super-deluxe' AND price_per_night = 1999) OR
+        (property_code = 'sbm-hotel' AND room_code = 'family' AND price_per_night = 2999) OR
+        (property_code = 'sbm-guest-house' AND room_code = 'deluxe' AND price_per_night = 2500) OR
+        (property_code = 'sbm-guest-house' AND room_code = 'family' AND price_per_night = 3500)
+      RETURNING id
+    `);
+    const clearedIds = cleared.rows.map((row: { id: string }) => row.id);
+
+    if (clearedIds.length > 0) {
+      await client.query(`
+        UPDATE rooms
+        SET price = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE room_type_id = ANY($1::varchar[])
+      `, [clearedIds]);
+
+      await client.query(`
+        UPDATE rate_plans
+        SET base_price = 0, updated_at = CURRENT_TIMESTAMP
+        WHERE room_type_id = ANY($1::varchar[])
+      `, [clearedIds]);
+    }
+
+    await client.query(
+      'INSERT INTO app_migrations (name) VALUES ($1) ON CONFLICT (name) DO NOTHING',
+      [migrationName]
+    );
+    await client.query('COMMIT');
+    console.log(`[SBM PRICING] PostgreSQL legacy tariffs cleared for ${clearedIds.length} room categories; other saved rates retained.`);
+  } catch (err: any) {
+    await client.query('ROLLBACK');
+    console.error('[SBM PRICING] PostgreSQL legacy pricing migration failed:', err.message);
+    throw err;
   }
 }
 
