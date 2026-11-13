@@ -2819,12 +2819,13 @@ export async function postgresUpdateGstPercent(gstPercent: number): Promise<numb
 export async function postgresGetBlockedRooms(): Promise<any[]> {
   if (!pool) throw new Error('PostgreSQL not available');
   const result = await pool.query(
-    'SELECT id, property_id, property_code, room_type_id, room_code, start_date, end_date, quantity, reason, created_at FROM blocked_rooms ORDER BY created_at DESC'
+    'SELECT id, property_id, property_code, room_type_id, room_code, start_date, end_date, end_date_inclusive, quantity, reason, created_at FROM blocked_rooms ORDER BY created_at DESC'
   );
   return result.rows.map(row => ({
     ...row,
     start_date: String(row.start_date).slice(0, 10),
     end_date: String(row.end_date).slice(0, 10),
+    end_date_inclusive: Boolean(row.end_date_inclusive),
     quantity: Number(row.quantity),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()
   }));
@@ -2835,18 +2836,19 @@ export async function postgresCreateBlockedRoom(block: any): Promise<any> {
   const id = block.id || `blk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const result = await pool.query(`
     INSERT INTO blocked_rooms
-      (id, property_id, property_code, room_type_id, room_code, start_date, end_date, quantity, reason, created_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
-    RETURNING id, property_id, property_code, room_type_id, room_code, start_date, end_date, quantity, reason, created_at
+      (id, property_id, property_code, room_type_id, room_code, start_date, end_date, end_date_inclusive, quantity, reason, created_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP)
+    RETURNING id, property_id, property_code, room_type_id, room_code, start_date, end_date, end_date_inclusive, quantity, reason, created_at
   `, [
     id, block.property_id, block.property_code, block.room_type_id, block.room_code,
-    block.start_date, block.end_date, block.quantity || 1, block.reason || ''
+    block.start_date, block.end_date, Boolean(block.end_date_inclusive), block.quantity || 1, block.reason || ''
   ]);
   const row = result.rows[0];
   return {
     ...row,
     start_date: String(row.start_date).slice(0, 10),
     end_date: String(row.end_date).slice(0, 10),
+    end_date_inclusive: Boolean(row.end_date_inclusive),
     quantity: Number(row.quantity),
     created_at: row.created_at ? new Date(row.created_at).toISOString() : new Date().toISOString()
   };
