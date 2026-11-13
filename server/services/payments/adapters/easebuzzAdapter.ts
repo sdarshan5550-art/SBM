@@ -314,13 +314,13 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
-        order_id: txnid,
+        order_id: verifiedTxnId,
         status: 'FAILED',
         error: 'Cryptographic response hash verification failed.'
       };
     }
 
-    const verifiedTxnId = payload?.txnid || txnid;
+    const verifiedTxnId = payload?.txnid || verifiedTxnId;
     if (!verifiedTxnId) {
       return {
         isValid: false,
@@ -339,7 +339,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
     try {
       const formParams = new URLSearchParams();
       formParams.append('key', key);
-      formParams.append('txnid', txnid);
+      formParams.append('txnid', verifiedTxnId);
       formParams.append('hash', retrieveHash);
 
       const response = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
