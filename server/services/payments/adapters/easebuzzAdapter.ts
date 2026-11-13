@@ -196,7 +196,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
 
     const formParams = new URLSearchParams();
     formParams.append('key', key);
-    formParams.append('txnid', txnid);
+    formParams.append('txnid', verifiedTxnId);
     formParams.append('amount', amountInRupees);
     formParams.append('productinfo', productinfo);
     formParams.append('firstname', firstname);
@@ -232,7 +232,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         const hostedCheckoutUrl = `${baseUrl}/pay/${accessKey}`;
 
         console.log(
-          `[Easebuzz Hosted Checkout - ${config.property_code}] Order Created Successfully: txnid=${txnid}, access_key=${accessKey.substring(0, 8)}...`
+          `[Easebuzz Hosted Checkout - ${config.property_code}] Order Created Successfully: txnid=${txnid}, access_key=[REDACTED]`
         );
 
         return {
@@ -260,7 +260,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       console.error(`[Easebuzz Payment Initiation Error - ${config.property_code}]`, err.message || err);
 
       // Simulation mode strictly controlled by ALLOW_PAYMENT_SIMULATION
-      if (process.env.ALLOW_PAYMENT_SIMULATION === 'true') {
+      if (process.env.NODE_ENV !== 'production' && !['live', 'prod', 'production'].includes((config.easebuzz_env || config.mode || process.env.SBM1_EASEBUZZ_ENV || '').toLowerCase()) && process.env.ALLOW_PAYMENT_SIMULATION === 'true') {
         console.warn(`[Easebuzz Simulator - ${config.property_code}] Simulation mode explicitly enabled via ALLOW_PAYMENT_SIMULATION=true.`);
         const simulatedUrl = `${appUrl}/manage-booking?booking_number=${params.receipt}&payment_status=success`;
         return {
@@ -299,7 +299,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
-        order_id: txnid,
+        order_id: verifiedTxnId,
         status: 'FAILED',
         error: `Easebuzz credentials missing for ${config.property_name}.`
       };
@@ -307,43 +307,34 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
 
     const payload = params.raw_payload;
 
-    // Case A: Verify incoming callback / redirect payload hash directly
-    if (payload && payload.hash) {
-      const isHashValid = this.verifyResponseHash(payload, salt);
-      if (!isHashValid) {
-        console.warn(`[Easebuzz Verification - ${config.property_code}] Invalid response hash for txnid=${txnid}`);
-        return {
-          isValid: false,
-          transaction_id: payload.easepayid || params.transaction_id,
-          order_id: txnid,
-          status: 'FAILED',
-          error: 'Cryptographic response hash verification failed.'
-        };
-      }
-
-      const status = (payload.status || '').toLowerCase();
-      const isSuccess = status === 'success';
-      const easepayid = payload.easepayid || payload.txnid || params.transaction_id;
-      const parsedAmount = payload.amount ? parseFloat(payload.amount) : undefined;
-
+    // Callback data is never sufficient to confirm a payment. If supplied, first
+    // authenticate its response hash, then independently query Easebuzz server-to-server.
+    if (payload && payload.hash && !this.verifyResponseHash(payload, salt)) {
+      console.warn(`[Easebuzz Verification - ${config.property_code}] Invalid response hash for txnid=${txnid}`);
       return {
-        isValid: isSuccess,
-        transaction_id: easepayid,
-        order_id: payload.txnid || txnid,
-        amount: parsedAmount,
-        currency: 'INR',
-        status: isSuccess ? 'SUCCESS' : (status === 'pending' ? 'PENDING' : 'FAILED'),
-        method: 'online_easebuzz',
-        error: isSuccess ? undefined : (payload.error_Message || `Payment status: ${status}`),
-        raw_response: payload
+        isValid: false,
+        transaction_id: params.transaction_id,
+        order_id: txnid,
+        status: 'FAILED',
+        error: 'Cryptographic response hash verification failed.'
+      };
+    }
+
+    const verifiedTxnId = payload?.txnid || txnid;
+    if (!verifiedTxnId) {
+      return {
+        isValid: false,
+        transaction_id: params.transaction_id,
+        status: 'FAILED',
+        error: 'Missing Easebuzz transaction reference.'
       };
     }
 
     // Case B: Query server-to-server Transaction Retrieve API
     const baseUrl = this.getBaseUrl(config);
-    const retrieveHash = this.generateRetrieveHash(key, txnid, salt);
+    const retrieveHash = this.generateRetrieveHash(key, verifiedTxnId, salt);
 
-    console.log(`[Easebuzz Verification - ${config.property_code}] Querying transaction status for txnid=${txnid}`);
+    console.log(`[Easebuzz Verification - ${config.property_code}] Querying transaction status for txnid=${verifiedTxnId}`);
 
     try {
       const formParams = new URLSearchParams();
@@ -351,7 +342,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       formParams.append('txnid', txnid);
       formParams.append('hash', retrieveHash);
 
-      const response = await fetch(`${baseUrl}/transaction/v1/retrieve`, {
+      const response = await fetch(`${baseUrl}/transaction/v2/retrieve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -366,8 +357,8 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
 
       const resJson = await response.json();
 
-      if (resJson && resJson.status && resJson.msg) {
-        const txnData = resJson.msg;
+      if (resJson && (resJson.status === 1 || resJson.status === true) && (resJson.data || resJson.msg)) {
+        const txnData = resJson.data || resJson.msg;
         const status = (txnData.status || '').toLowerCase();
         const isSuccess = status === 'success';
         const easepayid = txnData.easepayid || txnData.bank_ref_num || txnid;
@@ -376,7 +367,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         return {
           isValid: isSuccess,
           transaction_id: easepayid,
-          order_id: txnData.txnid || txnid,
+          order_id: txnData.txnid || verifiedTxnId,
           amount,
           currency: 'INR',
           status: isSuccess ? 'SUCCESS' : (status === 'pending' ? 'PENDING' : 'FAILED'),
@@ -394,7 +385,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         error: resJson?.error_desc || 'Transaction record not found in Easebuzz system.'
       };
     } catch (err: any) {
-      console.error(`[Easebuzz Retrieve Error - ${config.property_code}]`, err.message || err);
+      console.error(`[Easebuzz Transaction V2 Error - ${config.property_code}]`, err.message || err);
       return {
         isValid: false,
         transaction_id: params.transaction_id,
