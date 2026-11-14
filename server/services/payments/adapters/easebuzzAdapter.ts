@@ -196,7 +196,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
 
     const formParams = new URLSearchParams();
     formParams.append('key', key);
-    formParams.append('txnid', verifiedTxnId);
+    formParams.append('txnid', txnid);
     formParams.append('amount', amountInRupees);
     formParams.append('productinfo', productinfo);
     formParams.append('firstname', firstname);
@@ -236,7 +236,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         );
 
         return {
-          order_id: verifiedTxnId,
+          order_id: txnid,
           provider: 'easebuzz',
           amount: params.amountInPaise,
           currency: 'INR',
@@ -299,7 +299,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
-        order_id: verifiedTxnId,
+        order_id: txnid,
         status: 'FAILED',
         error: `Easebuzz credentials missing for ${config.property_name}.`
       };
@@ -314,7 +314,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
-        order_id: verifiedTxnId,
+        order_id: txnid,
         status: 'FAILED',
         error: 'Cryptographic response hash verification failed.'
       };
@@ -325,6 +325,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
+        order_id: txnid,
         status: 'FAILED',
         error: 'Missing Easebuzz transaction reference.'
       };
