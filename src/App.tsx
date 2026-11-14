@@ -54,7 +54,8 @@ export default function App() {
 
   useEffect(() => {
     const isSbm2 = propertyCodeParam === 'sbm-guest-house' || window.location.pathname.includes('/sbm-2-guest-house-salasar');
-    const isDedicatedProperty = window.location.pathname.includes('-salasar');
+    const currentPath = window.location.pathname.toLowerCase();
+    const isDedicatedProperty = currentPath === '/sbm-hotel-salasar' || currentPath === '/sbm-2-guest-house-salasar';
     const propertyName = isSbm2 ? 'SBM 2 Guest House' : 'SBM Hotel';
     const propertyPath = isSbm2 ? '/sbm-2-guest-house-salasar' : '/sbm-hotel-salasar';
     const page = currentTab === 'properties' && isDedicatedProperty ? 'property' : currentTab;
