@@ -9,9 +9,10 @@ import { ManagedImageDisplay } from '../components/ManagedImageDisplay';
 interface PropertyPageProps {
   initialCode?: string;
   onOpenBookingModal: () => void;
+  onPropertyChange?: (code: string) => void;
 }
 
-export const PropertyPage: React.FC<PropertyPageProps> = ({ initialCode, onOpenBookingModal }) => {
+export const PropertyPage: React.FC<PropertyPageProps> = ({ initialCode, onOpenBookingModal, onPropertyChange }) => {
   const [properties, setProperties] = useState<Property[]>([]);
   const [selectedPropertyCode, setSelectedPropertyCode] = useState<string>(initialCode || 'sbm-hotel');
   const [roomTypes, setRoomTypes] = useState<RoomType[]>([]);
@@ -54,7 +55,7 @@ export const PropertyPage: React.FC<PropertyPageProps> = ({ initialCode, onOpenB
           {properties.map((p) => (
             <button
               key={p.id}
-              onClick={() => setSelectedPropertyCode(p.code)}
+              onClick={() => { setSelectedPropertyCode(p.code); onPropertyChange?.(p.code); }}
               className={`px-6 py-2.5 font-serif text-xs transition-colors cursor-pointer uppercase tracking-[0.15em] ${
                 selectedPropertyCode === p.code
                   ? 'bg-[#1A1A1A] text-white font-bold'

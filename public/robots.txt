@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /decn
+Disallow: /api/
+Disallow: /manage-booking
+Disallow: /my-account
+
+Sitemap: https://sbmhotel.com/sitemap.xml
