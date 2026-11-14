@@ -270,6 +270,7 @@ export default function App() {
         {currentTab === 'properties' && (
           <PropertyPage
             initialCode={propertyCodeParam}
+            onPropertyChange={(code) => handleNavigate('properties', { code })}
             onOpenBookingModal={() => handleNavigate('home')}
           />
         )}
