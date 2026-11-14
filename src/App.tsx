@@ -13,39 +13,145 @@ import { ConciergeChat } from './components/ConciergeChat';
 import { BookingFlowModal } from './components/BookingFlowModal';
 import { RoomAvailabilityResult, Booking, PropertyCode, RoomCategoryCode, SocialMediaSettings } from './types';
 import { api } from './lib/api';
+import { updatePageSeo } from './lib/seo';
 import { Phone, Mail, MapPin, Calendar, HeartHandshake, Instagram, Facebook } from 'lucide-react';
 
 const getInitialTab = () => {
   const path = window.location.pathname.toLowerCase();
-  if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) {
-    return 'admin';
-  }
-  if (path.includes('manage-booking') || window.location.search.includes('booking_number')) {
-    return 'manage-booking';
-  }
+  if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) return 'admin';
+  if (path.includes('manage-booking') || window.location.search.includes('booking_number')) return 'manage-booking';
+  if (path === '/my-account' || path === '/my-account/') return 'my-account';
+  if (path === '/rooms' || path === '/rooms/') return 'rooms';
+  if (path === '/our-properties' || path === '/our-properties/' || path.includes('/sbm-hotel-salasar') || path.includes('/sbm-2-guest-house-salasar')) return 'properties';
+  if (path === '/about-salasar-balaji' || path === '/about-salasar-balaji/') return 'about';
+  if (path === '/contact' || path === '/contact/') return 'contact';
+  if (path === '/policies' || path === '/policies/') return 'policies';
   return 'home';
+};
+
+const getInitialPropertyCode = (): PropertyCode | undefined => {
+  const path = window.location.pathname.toLowerCase();
+  if (path.includes('/sbm-2-guest-house-salasar')) return 'sbm-guest-house';
+  if (path.includes('/sbm-hotel-salasar')) return 'sbm-hotel';
+  return undefined;
 };
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>(getInitialTab);
-  const [propertyCodeParam, setPropertyCodeParam] = useState<string | undefined>(undefined);
+  const [propertyCodeParam, setPropertyCodeParam] = useState<string | undefined>(getInitialPropertyCode);
   const [policyTabParam, setPolicyTabParam] = useState<PolicyTabKey>('terms');
   const [socialSettings, setSocialSettings] = useState<SocialMediaSettings | null>(null);
 
   useEffect(() => {
     const handleLocationChange = () => {
-      const path = window.location.pathname.toLowerCase();
-      if (path === '/decn' || path === '/decn/' || path.endsWith('/decn')) {
-        setCurrentTab('admin');
-      } else if (path.includes('manage-booking') || window.location.search.includes('booking_number')) {
-        setCurrentTab('manage-booking');
-      }
+      setCurrentTab(getInitialTab());
+      setPropertyCodeParam(getInitialPropertyCode());
     };
 
-    handleLocationChange();
     window.addEventListener('popstate', handleLocationChange);
     return () => window.removeEventListener('popstate', handleLocationChange);
   }, []);
+
+  useEffect(() => {
+    const isSbm2 = propertyCodeParam === 'sbm-guest-house' || window.location.pathname.includes('/sbm-2-guest-house-salasar');
+    const isDedicatedProperty = window.location.pathname.includes('-salasar');
+    const propertyName = isSbm2 ? 'SBM 2 Guest House' : 'SBM Hotel';
+    const propertyPath = isSbm2 ? '/sbm-2-guest-house-salasar' : '/sbm-hotel-salasar';
+    const page = currentTab === 'properties' && isDedicatedProperty ? 'property' : currentTab;
+
+    const seoPages: Record<string, { title: string; description: string; path: string; noIndex?: boolean }> = {
+      home: {
+        title: 'Hotels Near Salasar Balaji Temple, Rajasthan | SBM Hotels',
+        description: 'Find comfortable family accommodation near Salasar Balaji Temple in Salasar, Rajasthan. Explore SBM Hotel and SBM 2 Guest House and book your stay directly.',
+        path: '/'
+      },
+      rooms: {
+        title: 'Rooms & Accommodation in Salasar | SBM Hotels',
+        description: 'Explore room categories and accommodation options at SBM Hotel and SBM 2 Guest House near Salasar Balaji Temple, Rajasthan.',
+        path: '/rooms'
+      },
+      properties: {
+        title: 'Our Properties in Salasar, Rajasthan | SBM Hotels',
+        description: 'Explore SBM Hotel and SBM 2 Guest House, two accommodation options for families and devotees visiting Salasar Balaji Temple.',
+        path: '/our-properties'
+      },
+      property: {
+        title: `${propertyName} Near Salasar Balaji Temple | Official Booking`,
+        description: isSbm2
+          ? 'Explore SBM 2 Guest House in Salasar, Rajasthan. View property information, room options and contact details, and book your stay near Salasar Balaji Temple.'
+          : 'Explore SBM Hotel near Salasar Balaji Temple in Salasar, Rajasthan. View property information, room options and contact details, and book your stay directly.',
+        path: propertyPath
+      },
+      about: {
+        title: 'About SBM Hotels in Salasar, Rajasthan',
+        description: 'Learn about SBM Hotel and SBM 2 Guest House, offering accommodation for families and devotees visiting Sri Salasar Balaji Temple.',
+        path: '/about-salasar-balaji'
+      },
+      contact: {
+        title: 'Contact & Location | SBM Hotels, Salasar',
+        description: 'Contact SBM Hotel or SBM 2 Guest House for room enquiries and direct bookings in Salasar, Rajasthan.',
+        path: '/contact'
+      },
+      'manage-booking': {
+        title: 'Manage Your Booking | SBM Hotels',
+        description: 'View or manage an existing SBM Hotel or Guest House reservation.',
+        path: '/manage-booking',
+        noIndex: true
+      },
+      'my-account': {
+        title: 'Guest Account | SBM Hotels',
+        description: 'Access your SBM Hotels guest account.',
+        path: '/my-account',
+        noIndex: true
+      },
+      policies: {
+        title: 'Booking Policies | SBM Hotels, Salasar',
+        description: 'Read booking, privacy, cancellation and guest policies for SBM Hotel and SBM 2 Guest House.',
+        path: '/policies'
+      },
+      admin: {
+        title: 'Administration | SBM Hotels',
+        description: 'Restricted administration area.',
+        path: '/decn',
+        noIndex: true
+      }
+    };
+
+    const selected = seoPages[page] || seoPages.home;
+    const propertySchema = (isSbm2: boolean) => ({
+      '@type': 'Hotel',
+      '@id': `https://sbmhotel.com${isSbm2 ? '/sbm-2-guest-house-salasar' : '/sbm-hotel-salasar'}#hotel`,
+      name: isSbm2 ? 'SBM 2 Guest House' : 'SBM Hotel',
+      url: `https://sbmhotel.com${isSbm2 ? '/sbm-2-guest-house-salasar' : '/sbm-hotel-salasar'}`,
+      description: isSbm2
+        ? 'Accommodation in Salasar, Rajasthan, for visitors to Sri Salasar Balaji Temple.'
+        : 'Hotel accommodation near Sri Salasar Balaji Temple in Salasar, Rajasthan.',
+      telephone: isSbm2 ? '+91 98285 00845' : '+91 99835 67921',
+      email: isSbm2 ? 'sbmguesthouse@gmail.com' : 'sbmhotel@gmail.com',
+      address: {
+        '@type': 'PostalAddress',
+        addressLocality: 'Salasar',
+        addressRegion: 'Rajasthan',
+        postalCode: '331506',
+        addressCountry: 'IN'
+      }
+    });
+
+    const structuredData = page === 'property'
+      ? propertySchema(isSbm2)
+      : page === 'home' || page === 'properties'
+        ? {
+            '@context': 'https://schema.org',
+            '@graph': [
+              { '@type': 'Organization', '@id': 'https://sbmhotel.com/#organization', name: 'SBM Hotels', url: 'https://sbmhotel.com/' },
+              propertySchema(false),
+              propertySchema(true)
+            ]
+          }
+        : undefined;
+
+    updatePageSeo({ ...selected, structuredData });
+  }, [currentTab, propertyCodeParam, policyTabParam]);
 
   useEffect(() => {
     api.getSettings().then((s) => {
@@ -92,14 +198,20 @@ export default function App() {
     } else if (page === 'policies') {
       setPolicyTabParam('terms');
     }
-    if (page === 'admin') {
-      if (window.location.pathname !== '/decn') {
-        window.history.pushState({}, '', '/decn');
-      }
-    } else {
-      if (window.location.pathname === '/decn' || window.location.pathname.endsWith('/decn') || window.location.pathname === '/admin') {
-        window.history.pushState({}, '', '/');
-      }
+    const routePaths: Record<string, string> = {
+      home: '/',
+      rooms: '/rooms',
+      properties: params?.code === 'sbm-guest-house' ? '/sbm-2-guest-house-salasar' : params?.code === 'sbm-hotel' ? '/sbm-hotel-salasar' : '/our-properties',
+      about: '/about-salasar-balaji',
+      contact: '/contact',
+      'manage-booking': '/manage-booking',
+      'my-account': '/my-account',
+      policies: '/policies',
+      admin: '/decn'
+    };
+    const nextPath = routePaths[page] || '/';
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({}, '', nextPath);
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
