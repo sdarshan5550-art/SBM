@@ -2148,68 +2148,20 @@ ${JSON.stringify(liveAvail, null, 2)}
     }
   });
 
-  // Admin Manage Room Types / Pricing
+  // Admin Manage Room Types / Pricing / per-category GST
   app.put('/api/admin/room-types/:id', authenticateAdmin, (req, res) => {
     try {
-     const roomId = req.params.id;
-
-const requestedPrice =
-  req.body.price !== undefined
-    ? Number(req.body.price)
-    : undefined;
-
-if (
-  requestedPrice !== undefined &&
-  (!Number.isFinite(requestedPrice) || requestedPrice <= 0)
-) {
-  return res.status(400).json({
-    error: 'Room price must be greater than ₹0. Set a positive admin-configured tariff before saving.'
-  });
-}
-
-console.log(
-  `[PRICE UPDATE] ADMIN REQUEST | room=${roomId} | newPrice=₹${requestedPrice}`
-);
-
-const updated = db.updatePhysicalRoom(roomId, {
-  ...req.body,
-  ...(requestedPrice !== undefined
-    ? { price: requestedPrice }
-    : {})
-});
-
-const roomType = db
-  .getRoomTypes()
-  .find(
-    rt =>
-      rt.id === updated.room_type_id ||
-      (
-        rt.property_code === updated.property_code &&
-        rt.room_code === updated.room_code
-      )
-  );
-
-if (!roomType) {
-  throw new Error(
-    `Price updated but parent room type could not be found.`
-  );
-}
-
-console.log(
-  `[PRICE UPDATE] SAVED | ` +
-  `physicalRoom=${updated.id} | ` +
-  `roomType=${roomType.id} | ` +
-  `price=₹${roomType.price_per_night}`
-);
-
-res.json({
-  ...updated,
-  price: Number(updated.price),
-  price_per_night: Number(roomType.price_per_night)
-});
-    } catch (err: any) {
-      res.status(400).json({ error: err.message });
-    }
+      const requestedPrice = req.body.price_per_night !== undefined ? Number(req.body.price_per_night) : undefined;
+      const requestedTax = req.body.tax_percent !== undefined ? Number(req.body.tax_percent) : undefined;
+      if (requestedPrice !== undefined && (!Number.isFinite(requestedPrice) || requestedPrice < 0)) return res.status(400).json({ error: 'Room price must be ₹0 (not configured) or a valid amount.' });
+      if (requestedTax !== undefined && (!Number.isFinite(requestedTax) || requestedTax < 0 || requestedTax > 100)) return res.status(400).json({ error: 'GST percentage must be between 0 and 100.' });
+      const updated = db.updateRoomType(req.params.id, {
+        ...req.body,
+        ...(requestedPrice !== undefined ? { price_per_night: requestedPrice } : {}),
+        ...(requestedTax !== undefined ? { tax_percent: requestedTax } : {})
+      });
+      res.json(updated);
+    } catch (err: any) { res.status(400).json({ error: err.message }); }
   });
 
   // Admin Manage Properties
