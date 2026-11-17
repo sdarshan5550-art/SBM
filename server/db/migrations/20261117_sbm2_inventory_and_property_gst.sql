@@ -13,6 +13,7 @@ BEGIN
  ON CONFLICT(property_id,room_code) DO UPDATE SET name=EXCLUDED.name,description=EXCLUDED.description,capacity=EXCLUDED.capacity,bed_information=EXCLUDED.bed_information,amenities=EXCLUDED.amenities,tax_percent=5,total_rooms=8,status='active',updated_at=CURRENT_TIMESTAMP RETURNING id INTO suite_id;
  UPDATE room_types SET tax_percent=0,updated_at=CURRENT_TIMESTAMP WHERE property_code='sbm-hotel';
  UPDATE room_types SET tax_percent=5,updated_at=CURRENT_TIMESTAMP WHERE property_code='sbm-guest-house' AND room_code IN('deluxe','family');
+ UPDATE room_types SET status='inactive',updated_at=CURRENT_TIMESTAMP WHERE property_code='sbm-guest-house' AND room_code NOT IN('deluxe','family');
  UPDATE rooms SET active=FALSE,updated_at=CURRENT_TIMESTAMP WHERE property_id=pid AND room_number NOT IN('101','102','103','104','105','106','107','108','109','110','111','112','201','202','203','204','205','206','207','208','209','210','211','212','301','302','303','308','309','310','401','402','403','408','409','410','304','305','306','307','404','405','406','407')
  AND NOT EXISTS(SELECT 1 FROM reservation_rooms rr WHERE rr.room_id=rooms.id AND rr.status IN('ACTIVE','CHECKED_IN'));
  WITH inventory AS (
