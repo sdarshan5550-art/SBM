@@ -1074,6 +1074,7 @@ class DatabaseService {
     for (const rt of this.data.room_types) {
       if (rt.property_code === 'sbm-hotel') rt.tax_percent = 0;
       if (rt.property_code === 'sbm-guest-house' && ['deluxe','family'].includes(rt.room_code)) rt.tax_percent = 5;
+      if (rt.property_code === 'sbm-guest-house' && !['deluxe','family'].includes(rt.room_code)) rt.status = 'inactive';
     }
     if (this.data.settings) this.data.settings.gst_percent = 0;
     const deluxeNumbers = [...Array.from({length:12},(_,i)=>String(101+i)),...Array.from({length:12},(_,i)=>String(201+i)),'301','302','303','308','309','310','401','402','403','408','409','410'];
