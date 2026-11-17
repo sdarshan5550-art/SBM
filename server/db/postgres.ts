@@ -735,6 +735,13 @@ async function runLegacyRoomPricingMigration(client: PoolClient) {
   }
 }
 
+export async function updateRoomTypeTaxPercentInPostgres(roomTypeId: string, taxPercent: number): Promise<boolean> {
+  if (!pool || !isPostgresConnected) return false;
+  if (!Number.isFinite(taxPercent) || taxPercent < 0 || taxPercent > 100) throw new Error('GST percentage must be between 0 and 100.');
+  try { await pool.query('UPDATE room_types SET tax_percent=$1,updated_at=CURRENT_TIMESTAMP WHERE id=$2',[taxPercent,roomTypeId]); return true; }
+  catch (err:any) { console.error('[PostgreSQL] Failed to update room type GST:',err.message); return false; }
+}
+
 export async function updateRoomTypePriceInPostgres(
   roomTypeId: string,
   newPrice: number
@@ -1869,14 +1876,10 @@ export async function postgresCreateReservation(input: any): Promise<any> {
       throw new Error('This room has no admin-configured price yet. Please set its tariff in the Admin Panel before booking.');
     }
     const grossAmount = pricePerNight * nights * roomsRequested;
-    const settingsRes = await client.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
-    const configuredGstPercent = Number(settingsRes.rows[0]?.gst_percent);
-    if (!Number.isFinite(configuredGstPercent) || configuredGstPercent < 0 || configuredGstPercent > 100) {
-      throw new Error('A valid GST percentage must be configured in Admin Settings before creating a reservation.');
-    }
+    const configuredGstPercent = Number(roomType.tax_percent ?? 0);
+    if (!Number.isFinite(configuredGstPercent) || configuredGstPercent < 0 || configuredGstPercent > 100) throw new Error('A valid GST percentage must be configured for this room category.');
     const taxRate = configuredGstPercent / 100;
-    // Match the existing category tax treatment: Super Deluxe is GST-inclusive;
-    // other categories are GST-exclusive unless the schema is extended to store this flag.
+    // GST is stored per room category so each property can use its own rate.
     const isTaxInclusive = roomType.room_code === 'super-deluxe';
     const tax = isTaxInclusive
       ? Math.round(grossAmount - (grossAmount / (1 + taxRate)))
@@ -2226,12 +2229,6 @@ export async function postgresCheckAvailability(query: any): Promise<any[]> {
     rtQuery += ` AND property_code = $${rtParams.length}`;
   }
   const rtRes = await pool.query(rtQuery, rtParams);
-  const settingsRes = await pool.query('SELECT gst_percent FROM settings WHERE id = $1', ['default']);
-  const configuredGstPercent = Number(settingsRes.rows[0]?.gst_percent);
-  if (!Number.isFinite(configuredGstPercent) || configuredGstPercent < 0 || configuredGstPercent > 100) {
-    throw new Error('A valid GST percentage must be configured in Admin Settings.');
-  }
-  const effectiveGstPercent = configuredGstPercent;
 
   const results: any[] = [];
   for (const rt of rtRes.rows) {
@@ -2303,7 +2300,7 @@ export async function postgresCheckAvailability(query: any): Promise<any[]> {
         bed_information: rt.bed_information,
         amenities: typeof rt.amenities === 'string' ? JSON.parse(rt.amenities) : (rt.amenities || []),
         price_per_night: Number(rt.price_per_night),
-        tax_percent: effectiveGstPercent,
+        tax_percent: Number(rt.tax_percent ?? 0),
         total_rooms: rt.total_rooms,
         images: typeof rt.images === 'string' ? JSON.parse(rt.images) : (rt.images || []),
         status: rt.status

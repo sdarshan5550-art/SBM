@@ -619,7 +619,7 @@ export const BookingFlowModal: React.FC<BookingFlowModalProps> = ({
                       )}
 
                       <div className="flex justify-between text-[#666666]">
-                        <span>GST & Taxes (12% {isTaxInclusive ? 'included in tariff' : ''})</span>
+                        <span>GST & Taxes ({Number(selectedResult.roomType.tax_percent ?? 0)}% {isTaxInclusive ? 'included in tariff' : ''})</span>
                         <span className="font-medium text-[#1A1A1A]">₹{taxAmt.toLocaleString('en-IN')}</span>
                       </div>
                       <div className="border-t border-stone-200 pt-2 flex justify-between text-sm font-serif font-bold text-[#1A1A1A]">

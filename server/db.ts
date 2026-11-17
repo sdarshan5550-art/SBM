@@ -45,7 +45,7 @@ import {
   PropertyGatewayConfig
 } from '../src/types';
 import { DEFAULT_PHOTOS, ROOM_PHOTOS, PROPERTY_PHOTOS } from '../src/data/mockPhotos';
-import { updateRoomTypePriceInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
+import { updateRoomTypePriceInPostgres, updateRoomTypeTaxPercentInPostgres, updatePhysicalRoomPriceInPostgres } from './db/postgres';
 
 export const defaultSocialMediaSettings: SocialMediaSettings = {
   instagram: {
@@ -88,6 +88,7 @@ interface DatabaseData {
   admin_passwords: { [adminId: string]: string }; // hashed passwords
   admins: AdminUser[];
   physical_rooms: PhysicalRoom[];
+  migrations?: string[];
   activities: FrontDeskActivity[];
   knowledge_base: KnowledgeItem[];
   managed_images?: ManagedImage[];
@@ -1041,9 +1042,65 @@ class DatabaseService {
 
   constructor() {
     this.data = this.loadData();
+    this.ensureSBM2Inventory();
     this.syncRoomTypeImages();
     this.syncPropertyImages();
     this.syncRoomCounts();
+  }
+
+  // One-time idempotent seed. Old rooms are deactivated, not deleted, to retain booking history.
+  private ensureSBM2Inventory(): void {
+    const key = 'sbm2-inventory-44-v1';
+    this.data.migrations = this.data.migrations || [];
+    if (this.data.migrations.includes(key)) return;
+    const property = this.data.properties.find(p => p.code === 'sbm-guest-house');
+    if (!property) return;
+    const deluxeAmenities = ['Free WiFi','Free parking','Tea/Coffee Maker Kit','2 complimentary 500 ml water bottles'];
+    const suiteAmenities = ['Free WiFi','Free parking','Tea/Coffee Maker Kit','Safety locker','4 complimentary 500 ml water bottles'];
+    const upsert = (code: 'deluxe'|'family', values: Partial<RoomType>): RoomType => {
+      let rt = this.data.room_types.find(r => r.property_code === 'sbm-guest-house' && r.room_code === code);
+      if (!rt) {
+        rt = { id: code === 'deluxe' ? 'sbm2-deluxe-room' : 'sbm2-family-suite', property_id: property.id,
+          property_code: 'sbm-guest-house', room_code: code, name: code === 'deluxe' ? 'Deluxe Room' : 'Family Suite',
+          description: '', capacity: code === 'deluxe' ? 2 : 4, bed_information: '', amenities: [],
+          price_per_night: 0, tax_percent: 5, total_rooms: 0, images: [], status: 'active' };
+        this.data.room_types.push(rt);
+      }
+      Object.assign(rt, values, { property_id: property.id, property_code: 'sbm-guest-house', room_code: code, tax_percent: 5, status: 'active' });
+      return rt;
+    };
+    const deluxe = upsert('deluxe', { name:'Deluxe Room', description:'Double occupancy with complimentary WiFi, parking, tea/coffee maker kit and two 500 ml water bottles.', capacity:2, bed_information:'1 Double / King Bed', amenities:deluxeAmenities, total_rooms:36 });
+    const suite = upsert('family', { name:'Family Suite', description:'Four-person suite with one king-size bed, two single beds, tea/coffee maker kit, safety locker and four 500 ml water bottles.', capacity:4, bed_information:'1 King Size Bed + 2 Single Beds', amenities:suiteAmenities, total_rooms:8 });
+    for (const rt of this.data.room_types) {
+      if (rt.property_code === 'sbm-hotel') rt.tax_percent = 0;
+      if (rt.property_code === 'sbm-guest-house' && ['deluxe','family'].includes(rt.room_code)) rt.tax_percent = 5;
+      if (rt.property_code === 'sbm-guest-house' && !['deluxe','family'].includes(rt.room_code)) rt.status = 'inactive';
+    }
+    if (this.data.settings) this.data.settings.gst_percent = 0;
+    const deluxeNumbers = [...Array.from({length:12},(_,i)=>String(101+i)),...Array.from({length:12},(_,i)=>String(201+i)),'301','302','303','308','309','310','401','402','403','408','409','410'];
+    const suiteNumbers = ['304','305','306','307','404','405','406','407'];
+    const desired = new Set([...deluxeNumbers,...suiteNumbers]);
+    for (const room of this.data.physical_rooms) {
+      if (room.property_code === 'sbm-guest-house' && !desired.has(room.room_number) && !room.assigned_booking_id) {
+        room.active = false; room.updated_at = new Date().toISOString();
+      }
+    }
+    const addRoom = (number:string, rt:RoomType, floor:string, bathroom?:string) => {
+      const facilities = [...(rt.amenities||[]),...(bathroom?[bathroom]:[])];
+      const old = this.data.physical_rooms.find(r=>r.property_code==='sbm-guest-house'&&r.room_number===number);
+      if (old) {
+        const assigned = Boolean(old.assigned_booking_id);
+        Object.assign(old,{property_name:property.name,floor,facilities,max_guests:rt.capacity,bed_type:rt.bed_information,active:true,updated_at:new Date().toISOString(),
+          ...(assigned?{}:{room_type_id:rt.id,room_code:rt.room_code,room_name:rt.name,price:Number(old.price)>0?old.price:rt.price_per_night})});
+      } else {
+        this.data.physical_rooms.push({id:`sbm2-room-${number}`,property_code:'sbm-guest-house',property_name:property.name,room_type_id:rt.id,room_code:rt.room_code,room_name:rt.name,room_number:number,floor,status:'Available',updated_at:new Date().toISOString(),price:Number(rt.price_per_night)||0,facilities,images:[],max_guests:rt.capacity,bed_type:rt.bed_information,active:true});
+      }
+    };
+    for (const n of deluxeNumbers) addRoom(n,deluxe,({'1':'1st Floor','2':'2nd Floor','3':'3rd Floor','4':'4th Floor'} as Record<string,string>)[n[0]]);
+    for (const n of suiteNumbers) addRoom(n,suite,n.startsWith('3')?'3rd Floor':'4th Floor',n.startsWith('3')?'Double bathroom':'Single bathroom');
+    this.data.migrations.push(key);
+    this.save();
+    console.log('[SBM MIGRATION] SBM 2 inventory configured: 36 Deluxe + 8 Family Suites; GST defaults set.');
   }
 
   private loadData(): DatabaseData {
@@ -1285,6 +1342,12 @@ class DatabaseService {
       // Also sync to PostgreSQL if connected
       updateRoomTypePriceInPostgres(updated.id, newPrice).catch(console.error);
     }
+    if (updates.tax_percent !== undefined) {
+      const taxPercent = Number(updates.tax_percent);
+      if (!Number.isFinite(taxPercent) || taxPercent < 0 || taxPercent > 100) throw new Error('GST percentage must be between 0 and 100.');
+      updated.tax_percent = taxPercent;
+      updateRoomTypeTaxPercentInPostgres(updated.id, taxPercent).catch(console.error);
+    }
 
     this.save();
     return updated;
@@ -1433,8 +1496,8 @@ class DatabaseService {
       let taxAmount: number;
       let totalAmount: number;
 
-      // The GST percentage in System Configuration is the global source of truth.
-      const gstRate = (Number(this.getSettings().gst_percent) || 0) / 100;
+      // GST is configured per property room category.
+      const gstRate = (Number(room.tax_percent) || 0) / 100;
       if (room.is_tax_inclusive || room.room_code === 'super-deluxe') {
         // Tariff is inclusive of GST
         totalAmount = room.price_per_night * nights * (query.rooms || 1);
@@ -1531,7 +1594,7 @@ class DatabaseService {
         throw new Error(couponResult.error || 'Coupon is no longer valid. Please remove it and try again.');
       }
       bookingData.discount_amount = couponResult.discountAmount;
-      const gstRate = (Number(this.getSettings().gst_percent) || 0) / 100;
+      const gstRate = (Number(targetRes.roomType.tax_percent) || 0) / 100;
       const isTaxInclusive = targetRes.roomType.is_tax_inclusive || targetRes.roomType.room_code === 'super-deluxe';
       if (isTaxInclusive) {
         bookingData.total_amount = Math.max(0, targetRes.totalAmount - couponResult.discountAmount);
@@ -1866,7 +1929,7 @@ class DatabaseService {
     }
     const dateStr = targetDate || new Date().toISOString().split('T')[0];
 
-    let list = [...this.data.physical_rooms];
+    let list = [...this.data.physical_rooms].filter(r => r.active !== false);
     if (propertyCode && propertyCode !== 'all' && propertyCode !== 'both') {
       list = list.filter(r => r.property_code === propertyCode);
     }
@@ -2048,7 +2111,7 @@ class DatabaseService {
     if (physicalRooms.length > 0) {
       for (const rt of this.data.room_types) {
         const count = physicalRooms.filter(
-          pr => (pr.property_code === rt.property_code || pr.property_name === rt.property_id) &&
+          pr => pr.active !== false && (pr.property_code === rt.property_code || pr.property_name === rt.property_id) &&
                 (pr.room_type_id === rt.id || pr.room_code === rt.room_code)
         ).length;
         rt.total_rooms = count;
@@ -2260,7 +2323,7 @@ class DatabaseService {
     const roomsCount = input.rooms || 1;
     const pricePerNight = roomType.price_per_night;
     const grossAmount = pricePerNight * nights * roomsCount;
-    const gstRate = (Number(this.getSettings().gst_percent) || 0) / 100;
+    const gstRate = (Number(roomType.tax_percent) || 0) / 100;
     const isTaxInclusive = roomType.is_tax_inclusive || roomType.room_code === 'super-deluxe';
     const tax = isTaxInclusive
       ? Math.round(grossAmount - (grossAmount / (1 + gstRate)))
