@@ -376,6 +376,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
     try {
       const updated = await api.updateRoomType(editingRoom.id, {
         price_per_night: Number(editingRoom.price_per_night),
+        tax_percent: Number(editingRoom.tax_percent ?? 0),
         total_rooms: Number(editingRoom.total_rooms),
         capacity: Number(editingRoom.capacity),
         description: editingRoom.description,
@@ -1375,7 +1376,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
       {activeTab === 'inventory' && (
         <div className="space-y-6">
           <div className="bg-[#C5A059]/10 border border-[#C5A059]/30 p-4 text-xs text-[#1A1A1A]">
-            <strong>Room Categories Notice:</strong> Room tariffs and the global GST percentage are controlled by the Admin Panel. Changes saved here are used by customer listings and reservation calculations.
+            <strong>Room Categories Notice:</strong> Room tariffs and GST are managed per room category. SBM Hotel and SBM 2 Guest House can use separate GST rates. Changes saved here are used by customer listings and reservation calculations.
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1418,7 +1419,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                           <span className="text-[10px] uppercase text-[#666666] block tracking-wider">Price Per Night</span>
                           <span className="text-lg font-bold text-[#C5A059]">₹{room.price_per_night.toLocaleString('en-IN')}</span>
                           <span className="text-[9px] text-[#888888] block">
-                            {isTaxInclusive ? '(incl. of GST)' : `+ ${settings.gst_percent ?? 0}% GST`}
+                            {isTaxInclusive ? `(incl. of ${Number(room.tax_percent ?? 0)}% GST)` : `+ ${Number(room.tax_percent ?? 0)}% GST`}
                           </span>
                         </div>
 
@@ -1461,6 +1462,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onOpenBookingModal }) => {
                     />
                   </div>
 
+                  <div>
+                    <label className="block text-[#1A1A1A] mb-1 font-medium">GST Percentage (%)</label>
+                    <input type="number" min="0" max="100" step="0.01" required value={editingRoom.tax_percent ?? 0}
+                      onChange={(e) => setEditingRoom({ ...editingRoom, tax_percent: Number(e.target.value) })}
+                      className="w-full bg-[#FDFCFB] border border-stone-200 px-3 py-2 text-[#1A1A1A]" />
+                  </div>
                   <div>
                     <label className="block text-[#1A1A1A] mb-1 font-medium">Total Rooms Count</label>
                     <input
