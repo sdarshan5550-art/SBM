@@ -31,6 +31,7 @@ export interface PhysicalRoom {
   max_guests?: number;
   bed_type?: string;
   room_size?: string;
+  active?: boolean;
 }
 
 export interface FrontDeskActivity {
