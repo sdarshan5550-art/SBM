@@ -58,6 +58,8 @@ export const RoomManagementTab: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [propertyFilter, setPropertyFilter] = useState('all');
+  const [bulkStatus, setBulkStatus] = useState<RoomStatus>('Blocked');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
 
   const [showModal, setShowModal] = useState(false);
   const [editingRoom, setEditingRoom] = useState<ExtendedRoom | null>(null);
@@ -311,6 +313,54 @@ export const RoomManagementTab: React.FC = () => {
     }
   };
 
+  const bulkChangeStatus = async () => {
+    if (propertyFilter === 'all') {
+      alert('Please select either SBM Hotel or SBM 2 Guest House first. Bulk status changes are property-specific.');
+      return;
+    }
+
+    const propertyRooms = rooms.filter(room => room.property_code === propertyFilter);
+    const eligibleRooms = propertyRooms.filter(room => room.status !== 'Occupied' && room.status !== 'Reserved');
+    const skippedRooms = propertyRooms.length - eligibleRooms.length;
+
+    if (eligibleRooms.length === 0) {
+      alert('There are no eligible rooms to update. Occupied and Reserved rooms are protected.');
+      return;
+    }
+
+    const propertyName = properties.find(p => p.code === propertyFilter)?.name || propertyFilter;
+    const confirmed = confirm(
+      'Apply ' + bulkStatus + ' status to all ' + eligibleRooms.length + ' eligible rooms in ' + propertyName + '?' +
+      (skippedRooms ? '\n\n' + skippedRooms + ' Reserved/Occupied rooms will be left unchanged.' : '') +
+      '\n\nThis will affect only this property.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setBulkUpdating(true);
+      const results = await Promise.allSettled(
+        eligibleRooms.map(room => api.updatePhysicalRoom('', room.id, { status: bulkStatus }))
+      );
+      const succeededIds = new Set(
+        eligibleRooms.filter((_, index) => results[index].status === 'fulfilled').map(room => room.id)
+      );
+      setRooms(prev => prev.map(room => succeededIds.has(room.id) ? { ...room, status: bulkStatus } : room));
+      const failed = results.length - succeededIds.size;
+      if (failed === 0) {
+        alert(bulkStatus + ' status applied to ' + succeededIds.size + ' rooms in ' + propertyName + '.' +
+          (skippedRooms ? ' ' + skippedRooms + ' Reserved/Occupied rooms were not changed.' : ''));
+      } else {
+        alert('Updated ' + succeededIds.size + ' rooms. ' + failed + ' rooms failed; please retry after checking them.');
+      }
+      if (failed) await loadRooms();
+    } catch (error: any) {
+      alert(error.message || 'Unable to apply bulk room status.');
+      await loadRooms();
+    } finally {
+      setBulkUpdating(false);
+    }
+  };
+
   const deleteRoom = async (room: ExtendedRoom) => {
     if (!confirm(
       `Permanently delete Room ${room.room_number} (${room.property_name || room.property_code})? This will remove it from the system.`
@@ -440,6 +490,31 @@ export const RoomManagementTab: React.FC = () => {
           ))}
         </select>
 
+      </div>
+
+      {/* BULK ROOM STATUS */}
+      <div className="bg-white border border-stone-200 p-4 flex flex-col md:flex-row md:items-center gap-3">
+        <div className="flex-1">
+          <div className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">Bulk Room Status</div>
+          <p className="text-[11px] text-[#777] mt-1">Apply one status to all eligible rooms in the selected property only. Reserved and Occupied rooms are protected.</p>
+        </div>
+        <select
+          value={bulkStatus}
+          onChange={e => setBulkStatus(e.target.value as RoomStatus)}
+          className="border border-stone-200 px-3 py-2.5 text-xs"
+        >
+          <option value="Blocked">Blocked</option>
+          <option value="Available">Available</option>
+          <option value="Maintenance">Maintenance</option>
+        </select>
+        <button
+          onClick={bulkChangeStatus}
+          disabled={bulkUpdating || propertyFilter === 'all'}
+          className="bg-[#1A1A1A] text-white px-5 py-3 text-xs uppercase tracking-wider disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          {bulkUpdating ? 'Updating Rooms...' : 'Apply to Selected Hotel'}
+        </button>
+        {propertyFilter === 'all' && <span className="text-[10px] text-red-600">Select one hotel above first.</span>}
       </div>
 
       {/* ROOM TABLE */}
