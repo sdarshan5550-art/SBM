@@ -3817,7 +3817,7 @@ class DatabaseService {
     let displayOrder = imageData.displayOrder;
     if (typeof displayOrder !== 'number' || isNaN(displayOrder)) {
       const sameCategory = this.data.managed_images.filter(
-        img => (imageData.roomId && img.roomId === imageData.roomId) || img.category === imageData.category
+        img => (imageData.roomId && img.roomId === imageData.roomId && (img.propertyId || 'sbm-hotel') === (imageData.propertyId || 'sbm-hotel')) || img.category === imageData.category
       );
       displayOrder = sameCategory.length > 0
         ? Math.max(...sameCategory.map(i => i.displayOrder || 0)) + 1
@@ -3875,7 +3875,7 @@ class DatabaseService {
       this.data.managed_images.forEach(img => {
         if (
           img.id !== id &&
-          ((targetRoomId && img.roomId === targetRoomId) ||
+          ((targetRoomId && img.roomId === targetRoomId && (img.propertyId || 'sbm-hotel') === (targetPropertyId || 'sbm-hotel')) ||
             (targetPropertyId && img.propertyId === targetPropertyId && (!targetCategory || img.category === targetCategory)) ||
             (targetCategory && img.category === targetCategory && (!targetPropertyId || img.propertyId === targetPropertyId)))
         ) {
@@ -3916,9 +3916,9 @@ class DatabaseService {
     // If deleted image was primary, automatically assign primary status to next available image
     if (wasPrimary) {
       const fallback = this.data.managed_images.find(
-        img => (roomId && img.roomId === roomId) ||
+        img => (roomId && img.roomId === roomId && (img.propertyId || 'sbm-hotel') === (propertyId || 'sbm-hotel')) ||
                (propertyId && img.propertyId === propertyId) ||
-               (category && img.category === category)
+               (category && img.category === category && (img.propertyId || 'sbm-hotel') === (propertyId || 'sbm-hotel'))
       );
       if (fallback) {
         fallback.isPrimaryCover = true;
@@ -3953,9 +3953,9 @@ class DatabaseService {
           img.isMainForRoom = false;
         }
       } else if (
-        (effectiveRoomId && img.roomId === effectiveRoomId) ||
-        (effectivePropertyId && img.propertyId === effectivePropertyId) ||
-        (effectiveCategory && img.category === effectiveCategory && (!effectivePropertyId || img.propertyId === effectivePropertyId))
+        (effectiveRoomId && img.roomId === effectiveRoomId && (img.propertyId || 'sbm-hotel') === (effectivePropertyId || 'sbm-hotel')) ||
+        (effectivePropertyId && img.propertyId === effectivePropertyId && (!effectiveRoomId || img.roomId === effectiveRoomId)) ||
+        (effectiveCategory && img.category === effectiveCategory && (img.propertyId || 'sbm-hotel') === (effectivePropertyId || 'sbm-hotel'))
       ) {
         img.isPrimaryCover = false;
         img.isMainForRoom = false;
