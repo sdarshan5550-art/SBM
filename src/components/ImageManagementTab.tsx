@@ -52,6 +52,7 @@ export const ImageManagementTab: React.FC = () => {
   // Active navigation view inside Image Management: Rooms, Gallery, Rooms & Interiors, Property Cover Images, or About Page
   const [mainView, setMainView] = useState<'rooms' | 'gallery' | 'interiors' | 'property-covers' | 'about-page'>('interiors');
   const [selectedRoomForGallery, setSelectedRoomForGallery] = useState<'deluxe' | 'super-deluxe' | 'family' | null>(null);
+  const [roomImagePropertyFilter, setRoomImagePropertyFilter] = useState<'sbm-hotel' | 'sbm-guest-house'>('sbm-hotel');
   const [galleryCategoryFilter, setGalleryCategoryFilter] = useState<string>('all');
 
   // Interior Images Filter state
@@ -201,14 +202,18 @@ export const ImageManagementTab: React.FC = () => {
     }
   };
 
-  // 1. Room Images (Deluxe, Super Deluxe, Family Suite)
-  const deluxeImages = (images || []).filter(
+  // Room cover galleries are isolated by property as well as room category.
+  // Unassigned legacy room photos are retained under SBM Hotel only.
+  const roomImagesForSelectedProperty = (images || []).filter(img =>
+    (img.propertyId || 'sbm-hotel') === roomImagePropertyFilter
+  );
+  const deluxeImages = roomImagesForSelectedProperty.filter(
     img => img.roomId === 'deluxe' || img.category === 'Deluxe Room'
   );
-  const superDeluxeImages = (images || []).filter(
+  const superDeluxeImages = roomImagesForSelectedProperty.filter(
     img => img.roomId === 'super-deluxe' || img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe'
   );
-  const familyImages = (images || []).filter(
+  const familyImages = roomImagesForSelectedProperty.filter(
     img => img.roomId === 'family' || img.category === 'Family Suite'
   );
 
@@ -388,7 +393,7 @@ export const ImageManagementTab: React.FC = () => {
           description: uploadDescription,
           category: targetCat,
           roomId: targetRoom,
-          propertyId: uploadTargetRoom === 'none' ? uploadTargetProperty : 'sbm-hotel',
+          propertyId: uploadTargetProperty,
           isPrimaryCover: uploadIsPrimary && index === 0,
           isMainForRoom: uploadIsPrimary && index === 0
         });
@@ -402,7 +407,7 @@ export const ImageManagementTab: React.FC = () => {
           description: uploadDescription,
           category: targetCat,
           roomId: targetRoom,
-          propertyId: uploadTargetRoom === 'none' ? uploadTargetProperty : 'sbm-hotel',
+          propertyId: uploadTargetProperty,
           isPrimaryCover: uploadIsPrimary && itemsToUpload.length === 0,
           isMainForRoom: uploadIsPrimary && itemsToUpload.length === 0
         });
@@ -537,7 +542,7 @@ export const ImageManagementTab: React.FC = () => {
     setUploadIsPrimary(isPrimary);
     const cat = roomCode === 'deluxe' ? 'Deluxe Room' : (roomCode === 'super-deluxe' ? 'Super Deluxe Room' : 'Family Suite');
     setUploadTargetCategory(cat);
-    setUploadTargetProperty('sbm-hotel');
+    setUploadTargetProperty(roomImagePropertyFilter);
     setIsUploadModalOpen(true);
   };
 
@@ -771,6 +776,20 @@ export const ImageManagementTab: React.FC = () => {
       {/* MAIN VIEW 1: ROOM IMAGES */}
       {!loading && !error && mainView === 'rooms' && !selectedRoomForGallery && (
         <div className="space-y-6">
+          <div className="bg-white border border-[#C5A059]/20 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-stone-900">Room Cover Images</h3>
+              <p className="text-xs text-stone-500 mt-1">Manage separate Deluxe, Super Deluxe and Family Suite covers for each property.</p>
+            </div>
+            <select
+              value={roomImagePropertyFilter}
+              onChange={(e) => setRoomImagePropertyFilter(e.target.value as 'sbm-hotel' | 'sbm-guest-house')}
+              className="w-full sm:w-64 text-xs p-2.5 border border-stone-300 bg-white"
+            >
+              <option value="sbm-hotel">SBM Hotel</option>
+              <option value="sbm-guest-house">SBM 2 Guest House</option>
+            </select>
+          </div>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* 1. Deluxe Room Card */}
             <div id="card-deluxe-room-images" className="bg-white border border-[#C5A059]/20 shadow-sm p-6 space-y-4 flex flex-col justify-between">
@@ -1092,7 +1111,7 @@ export const ImageManagementTab: React.FC = () => {
                     ? 'Deluxe Room Gallery'
                     : (selectedRoomForGallery === 'super-deluxe' ? 'Super Deluxe Room Gallery' : 'Family Suite Gallery')}
                   <span className="text-xs font-normal text-stone-500 font-sans">
-                    ({(selectedRoomForGallery === 'deluxe' ? deluxeImages : (selectedRoomForGallery === 'super-deluxe' ? superDeluxeImages : familyImages)).length} photos)
+                    · {roomImagePropertyFilter === 'sbm-guest-house' ? 'SBM 2 Guest House' : 'SBM Hotel'} · ({(selectedRoomForGallery === 'deluxe' ? deluxeImages : (selectedRoomForGallery === 'super-deluxe' ? superDeluxeImages : familyImages)).length} photos)
                   </span>
                 </h3>
                 <p className="text-[11px] text-stone-500">
@@ -2496,24 +2515,24 @@ export const ImageManagementTab: React.FC = () => {
                     if (val === 'deluxe') {
                       setUploadTargetRoom('deluxe');
                       setUploadTargetCategory('Deluxe Room');
-                      setUploadTargetProperty('sbm-hotel');
+                      setUploadTargetProperty(roomImagePropertyFilter);
                     } else if (val === 'super-deluxe') {
                       setUploadTargetRoom('super-deluxe');
                       setUploadTargetCategory('Super Deluxe Room');
-                      setUploadTargetProperty('sbm-hotel');
+                      setUploadTargetProperty(roomImagePropertyFilter);
                     } else if (val === 'family') {
                       setUploadTargetRoom('family');
                       setUploadTargetCategory('Family Suite');
-                      setUploadTargetProperty('sbm-hotel');
+                      setUploadTargetProperty(roomImagePropertyFilter);
                     } else if (val === 'rooms-interiors') {
                       setUploadTargetRoom('none');
                       setUploadTargetCategory('Rooms & Interiors');
-                      setUploadTargetProperty('sbm-hotel');
+                      setUploadTargetProperty(roomImagePropertyFilter);
                       setUploadIsPrimary(false);
                     } else if (val === 'property-sbm-hotel') {
                       setUploadTargetRoom('none');
                       setUploadTargetCategory('Property Cover');
-                      setUploadTargetProperty('sbm-hotel');
+                      setUploadTargetProperty(roomImagePropertyFilter);
                       setUploadIsPrimary(true);
                     } else if (val === 'property-sbm-guest-house') {
                       setUploadTargetRoom('none');
@@ -2523,7 +2542,7 @@ export const ImageManagementTab: React.FC = () => {
                     } else {
                       setUploadTargetRoom('none');
                       setUploadTargetCategory('Hotel Exterior');
-                      setUploadTargetProperty('sbm-hotel');
+                      setUploadTargetProperty(roomImagePropertyFilter);
                       setUploadIsPrimary(false);
                     }
                   }}
