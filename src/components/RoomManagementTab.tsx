@@ -331,8 +331,8 @@ export const RoomManagementTab: React.FC = () => {
     const propertyName = properties.find(p => p.code === propertyFilter)?.name || propertyFilter;
     const confirmed = confirm(
       'Apply ' + bulkStatus + ' status to all ' + eligibleRooms.length + ' eligible rooms in ' + propertyName + '?' +
-      (skippedRooms ? '\\n\\n' + skippedRooms + ' Reserved/Occupied rooms will be left unchanged.' : '') +
-      '\\n\\nThis will affect only this property.'
+      (skippedRooms ? '\n\n' + skippedRooms + ' Reserved/Occupied rooms will be left unchanged.' : '') +
+      '\n\nThis will affect only this property.'
     );
     if (!confirmed) return;
 
