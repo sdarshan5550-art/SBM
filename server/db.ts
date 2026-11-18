@@ -3764,7 +3764,11 @@ class DatabaseService {
         }
       }
       if (filters.propertyId && filters.propertyId !== 'all') {
-        list = list.filter(img => !img.propertyId || img.propertyId === filters.propertyId);
+        // Legacy room images without a property assignment belong to SBM Hotel only.
+        list = list.filter(img => {
+          const imageProperty = img.propertyId || 'sbm-hotel';
+          return imageProperty === filters.propertyId;
+        });
       }
       if (filters.status && filters.status !== 'all') {
         list = list.filter(img => (img.status || 'active') === filters.status);
@@ -3993,14 +3997,17 @@ class DatabaseService {
       const rCode = roomType.room_code || (roomType.id.includes('super-deluxe') ? 'super-deluxe' : (roomType.id.includes('deluxe') ? 'deluxe' : 'family'));
       const rName = roomType.name;
 
-      // Find all managed images for this room type
-      const roomImgs = this.data.managed_images.filter(
-        img => img.roomId === rCode ||
-               img.category === rName ||
-               (rCode === 'deluxe' && img.category === 'Deluxe Room') ||
-               (rCode === 'super-deluxe' && (img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe')) ||
-               (rCode === 'family' && img.category === 'Family Suite')
-      );
+      // Room covers are scoped by both property and category.
+      // Unassigned legacy room images remain associated with SBM Hotel only.
+      const roomImgs = this.data.managed_images.filter(img => {
+        const imageRoomCode = img.roomId ||
+          (img.category === 'Deluxe Room' ? 'deluxe' :
+            (img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe' ? 'super-deluxe' :
+              (img.category === 'Family Suite' ? 'family' : undefined)));
+        const imageProperty = img.propertyId || 'sbm-hotel';
+        return imageRoomCode === rCode &&
+          (imageProperty === roomType.property_code || imageProperty === roomType.property_id);
+      });
 
       // Filter out invalid/empty/blob URLs
       const validRoomImgs = roomImgs.filter(
