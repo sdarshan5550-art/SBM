@@ -3764,7 +3764,11 @@ class DatabaseService {
         }
       }
       if (filters.propertyId && filters.propertyId !== 'all') {
-        list = list.filter(img => !img.propertyId || img.propertyId === filters.propertyId);
+        // Legacy room images without a property assignment belong to SBM Hotel only.
+        list = list.filter(img => {
+          const imageProperty = img.propertyId || 'sbm-hotel';
+          return imageProperty === filters.propertyId;
+        });
       }
       if (filters.status && filters.status !== 'all') {
         list = list.filter(img => (img.status || 'active') === filters.status);
@@ -3813,7 +3817,7 @@ class DatabaseService {
     let displayOrder = imageData.displayOrder;
     if (typeof displayOrder !== 'number' || isNaN(displayOrder)) {
       const sameCategory = this.data.managed_images.filter(
-        img => (imageData.roomId && img.roomId === imageData.roomId) || img.category === imageData.category
+        img => (imageData.roomId && img.roomId === imageData.roomId && (img.propertyId || 'sbm-hotel') === (imageData.propertyId || 'sbm-hotel')) || img.category === imageData.category
       );
       displayOrder = sameCategory.length > 0
         ? Math.max(...sameCategory.map(i => i.displayOrder || 0)) + 1
@@ -3871,7 +3875,7 @@ class DatabaseService {
       this.data.managed_images.forEach(img => {
         if (
           img.id !== id &&
-          ((targetRoomId && img.roomId === targetRoomId) ||
+          ((targetRoomId && img.roomId === targetRoomId && (img.propertyId || 'sbm-hotel') === (targetPropertyId || 'sbm-hotel')) ||
             (targetPropertyId && img.propertyId === targetPropertyId && (!targetCategory || img.category === targetCategory)) ||
             (targetCategory && img.category === targetCategory && (!targetPropertyId || img.propertyId === targetPropertyId)))
         ) {
@@ -3912,9 +3916,9 @@ class DatabaseService {
     // If deleted image was primary, automatically assign primary status to next available image
     if (wasPrimary) {
       const fallback = this.data.managed_images.find(
-        img => (roomId && img.roomId === roomId) ||
+        img => (roomId && img.roomId === roomId && (img.propertyId || 'sbm-hotel') === (propertyId || 'sbm-hotel')) ||
                (propertyId && img.propertyId === propertyId) ||
-               (category && img.category === category)
+               (category && img.category === category && (img.propertyId || 'sbm-hotel') === (propertyId || 'sbm-hotel'))
       );
       if (fallback) {
         fallback.isPrimaryCover = true;
@@ -3949,9 +3953,9 @@ class DatabaseService {
           img.isMainForRoom = false;
         }
       } else if (
-        (effectiveRoomId && img.roomId === effectiveRoomId) ||
-        (effectivePropertyId && img.propertyId === effectivePropertyId) ||
-        (effectiveCategory && img.category === effectiveCategory && (!effectivePropertyId || img.propertyId === effectivePropertyId))
+        (effectiveRoomId && img.roomId === effectiveRoomId && (img.propertyId || 'sbm-hotel') === (effectivePropertyId || 'sbm-hotel')) ||
+        (effectivePropertyId && img.propertyId === effectivePropertyId && (!effectiveRoomId || img.roomId === effectiveRoomId)) ||
+        (effectiveCategory && img.category === effectiveCategory && (img.propertyId || 'sbm-hotel') === (effectivePropertyId || 'sbm-hotel'))
       ) {
         img.isPrimaryCover = false;
         img.isMainForRoom = false;
@@ -3993,14 +3997,17 @@ class DatabaseService {
       const rCode = roomType.room_code || (roomType.id.includes('super-deluxe') ? 'super-deluxe' : (roomType.id.includes('deluxe') ? 'deluxe' : 'family'));
       const rName = roomType.name;
 
-      // Find all managed images for this room type
-      const roomImgs = this.data.managed_images.filter(
-        img => img.roomId === rCode ||
-               img.category === rName ||
-               (rCode === 'deluxe' && img.category === 'Deluxe Room') ||
-               (rCode === 'super-deluxe' && (img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe')) ||
-               (rCode === 'family' && img.category === 'Family Suite')
-      );
+      // Room covers are scoped by both property and category.
+      // Unassigned legacy room images remain associated with SBM Hotel only.
+      const roomImgs = this.data.managed_images.filter(img => {
+        const imageRoomCode = img.roomId ||
+          (img.category === 'Deluxe Room' ? 'deluxe' :
+            (img.category === 'Super Deluxe Room' || img.category === 'Super Deluxe' ? 'super-deluxe' :
+              (img.category === 'Family Suite' ? 'family' : undefined)));
+        const imageProperty = img.propertyId || 'sbm-hotel';
+        return imageRoomCode === rCode &&
+          (imageProperty === roomType.property_code || imageProperty === roomType.property_id);
+      });
 
       // Filter out invalid/empty/blob URLs
       const validRoomImgs = roomImgs.filter(
