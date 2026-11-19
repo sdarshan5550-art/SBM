@@ -16,6 +16,9 @@ export function getPostgresPool(): Pool | null {
 export async function initializePostgres(): Promise<boolean> {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('DATABASE_URL is required in production; refusing to start with JSON fallback storage.');
+    }
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('ℹ️ [SBM Hotel PMS] DATABASE_URL not set in environment.');
     console.log('ℹ️ Running in DEVELOPMENT FALLBACK mode with structured JSON DB.');
@@ -53,9 +56,13 @@ export async function initializePostgres(): Promise<boolean> {
     return true;
   } catch (err: any) {
     console.error('❌ [SBM Hotel PMS] PostgreSQL Connection Failed:', err.message);
-    console.warn('⚠️ [SBM Hotel PMS] Falling back to structured JSON development storage.');
     isPostgresConnected = false;
+    await pool?.end().catch(() => undefined);
     pool = null;
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('PostgreSQL is unavailable in production. Startup aborted to prevent split or lost booking data.');
+    }
+    console.warn('⚠️ [SBM Hotel PMS] Falling back to structured JSON development storage.');
     return false;
   }
 }
@@ -70,6 +77,7 @@ async function runSchemaMigration(client: PoolClient) {
     }
   } catch (err: any) {
     console.error('❌ [SBM Hotel PMS] Error running schema migration:', err.message);
+    throw err;
   }
 }
 
