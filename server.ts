@@ -49,7 +49,7 @@ import { paymentGatewayRegistry } from './server/services/payments/paymentGatewa
 import { EasebuzzAdapter } from './server/services/payments/adapters/easebuzzAdapter';
 import { PropertyCode, PaymentTransactionRecord, CombinedBookingGroup, PaymentGatewayProviderType } from './src/types';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'sbm_hotel_salasar_secret_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET || (process.env.NODE_ENV === 'production' ? '' : crypto.randomBytes(32).toString('hex'));
 const PORT = 3000;
 
 // Initialize Gemini Client
@@ -63,7 +63,11 @@ const ai = new GoogleGenAI({
 });
 
 async function startServer() {
-  // Initialize Database (PostgreSQL if DATABASE_URL is set, otherwise JSON fallback)
+  if (process.env.NODE_ENV === 'production' && (!JWT_SECRET || JWT_SECRET.length < 32)) {
+    throw new Error('JWT_SECRET must be configured with at least 32 characters in production.');
+  }
+
+  // Initialize Database (production must never silently fall back to JSON storage)
   await initializePostgres();
 
   // Channel Manager: Recover any stuck sync jobs from prior server crash or reboot
@@ -87,34 +91,7 @@ async function startServer() {
     }
   }));
 
-  app.get('/api/debug/database', (req, res) => {
-    try {
-      const dataDir = process.env.SBM_DATA_DIR
-        ? path.resolve(process.env.SBM_DATA_DIR)
-        : path.resolve(process.cwd(), 'data');
-
-      const dbFile = path.join(dataDir, 'sbm_database.json');
-
-      const room = db
-        .getRoomTypes('sbm-hotel')
-        .find(r => r.id === 'room-sbm-deluxe');
-
-      res.json({
-        process_cwd: process.cwd(),
-        database_directory: dataDir,
-        database_file: dbFile,
-        database_file_exists: fs.existsSync(dbFile),
-        database_file_modified: fs.existsSync(dbFile)
-          ? fs.statSync(dbFile).mtime
-          : null,
-        deluxe_room: room || null
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        error: error.message
-      });
-    }
-  });
+  // Database diagnostics are intentionally not exposed as a public HTTP endpoint.
 
   // Middleware: Admin JWT Authentication Check
   const authenticateAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -211,7 +188,79 @@ async function startServer() {
   // Create Booking
   app.post('/api/bookings', (req, res) => {
     try {
-      const booking = db.createBooking(req.body);
+      const raw = req.body || {};
+      const propertyCode = String(raw.property_code || '');
+      if (propertyCode !== 'sbm-hotel' && propertyCode !== 'sbm-guest-house') {
+        return res.status(400).json({ error: 'A valid hotel property is required.' });
+      }
+
+      const check_in = String(raw.check_in || '');
+      const check_out = String(raw.check_out || '');
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+      const isRealDate = (value: string) => {
+        if (!datePattern.test(value)) return false;
+        const parsed = new Date(value + 'T00:00:00.000Z');
+        return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      };
+      if (!isRealDate(check_in) || !isRealDate(check_out) || check_out <= check_in) {
+        return res.status(400).json({ error: 'Valid check-in and check-out dates are required.' });
+      }
+
+      const roomsCount = Number(raw.rooms_requested ?? raw.rooms ?? 1);
+      const adults = Number(raw.adults ?? 1);
+      const children = Number(raw.children ?? 0);
+      if (!Number.isInteger(roomsCount) || roomsCount < 1 || roomsCount > 10 ||
+          !Number.isInteger(adults) || adults < 1 || adults > 20 ||
+          !Number.isInteger(children) || children < 0 || children > 20) {
+        return res.status(400).json({ error: 'Invalid room or guest count.' });
+      }
+
+      const property = db.getProperties().find(p => p.code === propertyCode);
+      if (!property) return res.status(400).json({ error: 'Selected property was not found.' });
+
+      const availability = db.checkAvailability({
+        property_code: propertyCode,
+        check_in,
+        check_out,
+        adults,
+        children,
+        rooms: roomsCount
+      });
+      const matched = availability.find(r =>
+        r.roomType.id === raw.room_type_id || r.roomType.room_code === raw.room_type_id
+      );
+      if (!matched || !matched.isAvailable || matched.availableRooms < roomsCount) {
+        return res.status(409).json({ error: 'The selected room is unavailable for these dates.' });
+      }
+
+      const booking = db.createBooking({
+        property_id: property.id,
+        property_code: property.code,
+        property_name: property.name,
+        room_type_id: matched.roomType.id,
+        room_name: matched.roomType.name,
+        check_in,
+        check_out,
+        nights: matched.nights,
+        adults,
+        children,
+        rooms_requested: roomsCount,
+        guest_name: String(raw.guest_name || '').trim(),
+        guest_phone: String(raw.guest_phone || ''),
+        guest_email: String(raw.guest_email || ''),
+        guest_address: String(raw.guest_address || ''),
+        special_request: String(raw.special_request || '').slice(0, 1000),
+        coupon_code: typeof raw.coupon_code === 'string' ? raw.coupon_code.trim() : undefined,
+        price_per_night: matched.pricePerNight,
+        room_subtotal: matched.subtotal,
+        discount_amount: 0,
+        tax_amount: matched.taxAmount,
+        total_amount: matched.totalAmount,
+        payment_method: 'pay_at_hotel',
+        payment_status: 'Pending',
+        booking_status: 'Pending',
+        source: 'WEBSITE'
+      } as any);
 
       // Trigger Channel Manager Central Inventory Synchronization across all channels
       if (booking && booking.property_code && booking.room_type_id) {

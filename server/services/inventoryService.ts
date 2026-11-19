@@ -16,8 +16,7 @@ export interface InventoryLock {
   created_at: string;
 }
 
-// In-memory active locks store with persistent sync
-const memoryLocks: Map<string, InventoryLock> = new Map();
+// Inventory holds are read from and written to the durable database store.
 
 export const inventoryService = {
   // 1. Central source of truth for checking room availability
@@ -82,9 +81,7 @@ export const inventoryService = {
       created_at: new Date().toISOString()
     };
 
-    memoryLocks.set(lockId, lock);
-
-    // Also register temporary hold in DB so DB queries recognize it
+    // Persist before reporting success so a process restart cannot lose the hold.
     db.registerInventoryHold(lock);
 
     return { success: true, lockId };
@@ -112,13 +109,10 @@ export const inventoryService = {
 
   // 4. Release inventory lock on dismissal or failure
   releaseLock(lockIdOrSessionId: string): void {
-    for (const [id, lock] of memoryLocks.entries()) {
-      if (id === lockIdOrSessionId || lock.session_id === lockIdOrSessionId) {
-        lock.status = 'RELEASED';
-        memoryLocks.delete(id);
-        db.releaseInventoryHold(id);
-      }
-    }
+    const matches = db.getInventoryHolds().filter((lock: InventoryLock) =>
+      lock.id === lockIdOrSessionId || lock.session_id === lockIdOrSessionId
+    );
+    for (const lock of matches) db.releaseInventoryHold(lock.id);
   },
 
   releaseHold(lockIdOrSessionId: string): void {
@@ -127,25 +121,18 @@ export const inventoryService = {
 
   // 5. Convert inventory lock to confirmed reservation
   convertLock(lockIdOrSessionId: string, reservationId: string): void {
-    for (const [id, lock] of memoryLocks.entries()) {
-      if (id === lockIdOrSessionId || lock.session_id === lockIdOrSessionId) {
-        lock.status = 'CONVERTED';
-        lock.reservation_id = reservationId;
-        memoryLocks.delete(id);
-        db.releaseInventoryHold(id);
-      }
-    }
+    const matches = db.getInventoryHolds().filter((lock: InventoryLock) =>
+      lock.id === lockIdOrSessionId || lock.session_id === lockIdOrSessionId
+    );
+    for (const lock of matches) db.releaseInventoryHold(lock.id);
   },
 
   // 6. Housekeeping cleanup for expired locks
   cleanupExpiredLocks(): void {
     const now = new Date().toISOString();
-    for (const [id, lock] of memoryLocks.entries()) {
-      if (lock.expires_at < now && lock.status === 'ACTIVE') {
-        lock.status = 'EXPIRED';
-        memoryLocks.delete(id);
-        db.releaseInventoryHold(id);
-      }
-    }
+    const expired = db.getInventoryHolds().filter((lock: InventoryLock) =>
+      lock.status === 'ACTIVE' && lock.expires_at <= now
+    );
+    for (const lock of expired) db.releaseInventoryHold(lock.id);
   }
 };

@@ -108,7 +108,14 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
     const expectedHash = crypto.createHash('sha512').update(hashString).digest('hex').toLowerCase();
     const receivedHash = (data.hash || '').toLowerCase();
 
-    return expectedHash === receivedHash;
+    try {
+      const expected = Buffer.from(expectedHash, 'hex');
+      const received = Buffer.from(receivedHash, 'hex');
+      return expected.length === received.length && expected.length > 0 &&
+        crypto.timingSafeEqual(expected, received);
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -196,7 +203,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
 
     const formParams = new URLSearchParams();
     formParams.append('key', key);
-    formParams.append('txnid', verifiedTxnId);
+    formParams.append('txnid', txnid);
     formParams.append('amount', amountInRupees);
     formParams.append('productinfo', productinfo);
     formParams.append('firstname', firstname);
@@ -236,7 +243,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
         );
 
         return {
-          order_id: verifiedTxnId,
+          order_id: txnid,
           provider: 'easebuzz',
           amount: params.amountInPaise,
           currency: 'INR',
@@ -299,7 +306,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
-        order_id: verifiedTxnId,
+        order_id: txnid,
         status: 'FAILED',
         error: `Easebuzz credentials missing for ${config.property_name}.`
       };
@@ -314,7 +321,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
-        order_id: verifiedTxnId,
+        order_id: txnid,
         status: 'FAILED',
         error: 'Cryptographic response hash verification failed.'
       };
@@ -325,6 +332,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
+        order_id: txnid || '',
         status: 'FAILED',
         error: 'Missing Easebuzz transaction reference.'
       };

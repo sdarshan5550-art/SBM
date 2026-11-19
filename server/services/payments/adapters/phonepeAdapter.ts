@@ -97,7 +97,7 @@ export class PhonePeAdapter implements IPaymentGatewayAdapter {
       console.error(`[PhonePe Standard Checkout Error - ${config.property_code}]`, err.message || err);
 
       // Simulation fallback strictly controlled by ALLOW_PAYMENT_SIMULATION
-      if (process.env.ALLOW_PAYMENT_SIMULATION === 'true') {
+      if (process.env.NODE_ENV !== 'production' && config.mode !== 'live' && String(config.phonepe_env || '').toUpperCase() === 'SANDBOX' && process.env.ALLOW_PAYMENT_SIMULATION === 'true') {
         console.warn(`[PhonePe Simulator - ${config.property_code}] Simulation mode explicitly enabled via ALLOW_PAYMENT_SIMULATION=true.`);
         const simulatedUrl = `${process.env.APP_URL || 'https://sbmhotel.com'}/manage-booking?booking_number=${params.receipt}&payment_status=success`;
         return {
