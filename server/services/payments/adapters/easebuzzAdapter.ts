@@ -332,6 +332,7 @@ export class EasebuzzAdapter implements IPaymentGatewayAdapter {
       return {
         isValid: false,
         transaction_id: params.transaction_id,
+        order_id: txnid || '',
         status: 'FAILED',
         error: 'Missing Easebuzz transaction reference.'
       };
