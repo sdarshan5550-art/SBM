@@ -320,39 +320,24 @@ export const RoomManagementTab: React.FC = () => {
     }
 
     const propertyRooms = rooms.filter(room => room.property_code === propertyFilter);
-    const eligibleRooms = propertyRooms.filter(room => room.status !== 'Occupied' && room.status !== 'Reserved');
-    const skippedRooms = propertyRooms.length - eligibleRooms.length;
-
-    if (eligibleRooms.length === 0) {
-      alert('There are no eligible rooms to update. Occupied and Reserved rooms are protected.');
+    if (propertyRooms.length === 0) {
+      alert('No rooms are available to update in this property.');
       return;
     }
 
     const propertyName = properties.find(p => p.code === propertyFilter)?.name || propertyFilter;
     const confirmed = confirm(
-      'Apply ' + bulkStatus + ' status to all ' + eligibleRooms.length + ' eligible rooms in ' + propertyName + '?' +
-      (skippedRooms ? '\n\n' + skippedRooms + ' Reserved/Occupied rooms will be left unchanged.' : '') +
-      '\n\nThis will affect only this property.'
+      'Apply ' + bulkStatus + ' status to all ' + propertyRooms.length + ' rooms in ' + propertyName + '?' +
+      '\n\nThis includes rooms currently marked Reserved or Occupied. Active booking information is preserved and booking-derived status will continue to take priority.' +
+      '\n\nThis affects only the selected property.'
     );
     if (!confirmed) return;
 
     try {
       setBulkUpdating(true);
-      const results = await Promise.allSettled(
-        eligibleRooms.map(room => api.updatePhysicalRoom('', room.id, { status: bulkStatus }))
-      );
-      const succeededIds = new Set(
-        eligibleRooms.filter((_, index) => results[index].status === 'fulfilled').map(room => room.id)
-      );
-      setRooms(prev => prev.map(room => succeededIds.has(room.id) ? { ...room, status: bulkStatus } : room));
-      const failed = results.length - succeededIds.size;
-      if (failed === 0) {
-        alert(bulkStatus + ' status applied to ' + succeededIds.size + ' rooms in ' + propertyName + '.' +
-          (skippedRooms ? ' ' + skippedRooms + ' Reserved/Occupied rooms were not changed.' : ''));
-      } else {
-        alert('Updated ' + succeededIds.size + ' rooms. ' + failed + ' rooms failed; please retry after checking them.');
-      }
-      if (failed) await loadRooms();
+      const result = await api.bulkUpdatePhysicalRoomStatus(propertyFilter, bulkStatus);
+      await loadRooms();
+      alert(result.updated_count + ' rooms in ' + propertyName + ' updated to ' + bulkStatus + '.');
     } catch (error: any) {
       alert(error.message || 'Unable to apply bulk room status.');
       await loadRooms();
@@ -496,16 +481,18 @@ export const RoomManagementTab: React.FC = () => {
       <div className="bg-white border border-stone-200 p-4 flex flex-col md:flex-row md:items-center gap-3">
         <div className="flex-1">
           <div className="text-xs font-bold uppercase tracking-wider text-[#1A1A1A]">Bulk Room Status</div>
-          <p className="text-[11px] text-[#777] mt-1">Apply one status to all eligible rooms in the selected property only. Reserved and Occupied rooms are protected.</p>
+          <p className="text-[11px] text-[#777] mt-1">Apply a status to every room in the selected property, including rooms currently marked Reserved or Occupied. Active bookings remain linked.</p>
         </div>
         <select
           value={bulkStatus}
           onChange={e => setBulkStatus(e.target.value as RoomStatus)}
           className="border border-stone-200 px-3 py-2.5 text-xs"
         >
-          <option value="Blocked">Blocked</option>
           <option value="Available">Available</option>
+          <option value="Reserved">Reserved</option>
+          <option value="Occupied">Occupied</option>
           <option value="Maintenance">Maintenance</option>
+          <option value="Blocked">Blocked</option>
         </select>
         <button
           onClick={bulkChangeStatus}
