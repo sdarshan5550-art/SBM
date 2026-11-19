@@ -1951,8 +1951,9 @@ class DatabaseService {
         if (b.property_code !== room.property_code) return false;
         if (b.room_name !== room.room_name && b.room_type_id !== room.room_type_id) return false;
         if (b.booking_status === 'Cancelled' || b.booking_status === 'No Show' || b.booking_status === 'Checked Out') return false;
-        // Check if room number matches or matches assigned booking
-        if (b.room_number && b.room_number !== room.room_number) return false;
+        // A booking affects a physical room only when that exact room number is assigned.
+        // Room-type bookings without a room assignment must not mark every room in the category Reserved.
+        if (!b.room_number || String(b.room_number).trim() !== String(room.room_number).trim()) return false;
         return b.check_in <= dateStr && dateStr < b.check_out;
       });
 
