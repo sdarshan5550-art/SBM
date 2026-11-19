@@ -1969,7 +1969,7 @@ class DatabaseService {
       }
 
       // Default
-      if (room.status === 'Occupied' || room.status === 'Reserved') {
+      if ((room.status === 'Occupied' || room.status === 'Reserved') && !room.manual_status) {
         return {
           ...room,
           status: 'Available',
@@ -2015,6 +2015,7 @@ class DatabaseService {
     const updated: PhysicalRoom = {
       ...currentRoom,
       ...updates,
+      ...(updates.status !== undefined ? { manual_status: updates.status === 'Reserved' || updates.status === 'Occupied' } : {}),
       updated_at: new Date().toISOString()
     };
     this.data.physical_rooms[idx] = updated;
@@ -2038,6 +2039,23 @@ class DatabaseService {
 
     this.save();
     return updated;
+  }
+
+  public bulkUpdatePhysicalRoomStatus(propertyCode: PropertyCode, status: RoomStatus, performedBy: string = 'Admin'): PhysicalRoom[] {
+    if (!this.data.physical_rooms) this.data.physical_rooms = [];
+    const now = new Date().toISOString();
+    const rooms = this.data.physical_rooms.filter(room => room.property_code === propertyCode && room.active !== false);
+    if (rooms.length === 0) throw new Error(`No active physical rooms found for ${propertyCode}.`);
+
+    for (const room of rooms) {
+      room.status = status;
+      room.manual_status = status === 'Reserved' || status === 'Occupied';
+      room.updated_at = now;
+    }
+
+    this.addActivity('Status Update', `Bulk update: ${rooms.length} rooms in ${propertyCode} marked as ${status}`, propertyCode, performedBy);
+    this.save();
+    return rooms;
   }
 
   public addPhysicalRoom(roomData: Omit<PhysicalRoom, 'id' | 'updated_at'>): PhysicalRoom {
