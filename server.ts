@@ -2533,6 +2533,24 @@ ${JSON.stringify(liveAvail, null, 2)}
     }
   });
 
+  app.post('/api/admin/physical-rooms/bulk-status', authenticateAdmin, (req, res) => {
+    try {
+      const { propertyCode, status } = req.body || {};
+      const allowedStatuses = ['Available', 'Reserved', 'Occupied', 'Maintenance', 'Blocked'];
+      if (!['sbm-hotel', 'sbm-guest-house'].includes(propertyCode)) {
+        return res.status(400).json({ error: 'A valid propertyCode is required.' });
+      }
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ error: 'Invalid room status. Choose Available, Reserved, Occupied, Maintenance or Blocked.' });
+      }
+      const admin = (req as any).admin;
+      const updated = db.bulkUpdatePhysicalRoomStatus(propertyCode, status, admin?.name || admin?.email || 'Admin');
+      res.json({ success: true, updated_count: updated.length, status, rooms: updated });
+    } catch (err: any) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
   app.put('/api/admin/physical-rooms/:id', authenticateAdmin, (req, res) => {
     try {
       const roomId = req.params.id;
