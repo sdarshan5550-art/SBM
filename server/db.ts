@@ -2922,14 +2922,25 @@ class DatabaseService {
   }
 
   // --- INVENTORY HOLDS ---
+  public getInventoryHolds(): any[] {
+    if (!this.data.inventory_holds) this.data.inventory_holds = [];
+    return this.data.inventory_holds;
+  }
+
   public registerInventoryHold(lock: any): void {
     if (!this.data.inventory_holds) this.data.inventory_holds = [];
+    this.data.inventory_holds = this.data.inventory_holds.filter((item: any) => item.id !== lock.id);
     this.data.inventory_holds.push(lock);
+    this.save();
   }
 
   public releaseInventoryHold(lockId: string): void {
     if (!this.data.inventory_holds) return;
-    this.data.inventory_holds = this.data.inventory_holds.filter((l: any) => l.id !== lockId);
+    const remaining = this.data.inventory_holds.filter((item: any) => item.id !== lockId);
+    if (remaining.length !== this.data.inventory_holds.length) {
+      this.data.inventory_holds = remaining;
+      this.save();
+    }
   }
 
   // --- KNOWLEDGE BASE ---
