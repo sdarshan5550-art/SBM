@@ -580,6 +580,11 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(updates)
     }),
+  bulkUpdatePhysicalRoomStatus: (propertyCode: string, status: string) =>
+    request<{ success: boolean; updated_count: number; status: string; rooms: any[] }>('/api/admin/physical-rooms/bulk-status', {
+      method: 'POST',
+      body: JSON.stringify({ propertyCode, status })
+    }),
   addPhysicalRoom: (token: string, roomData: any) =>
     request<any>('/api/admin/physical-rooms', {
       method: 'POST',

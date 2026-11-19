@@ -14,6 +14,8 @@ export interface PhysicalRoom {
   room_number: string; // e.g., '101', '102', '201'
   floor?: string;
   status: RoomStatus;
+  /** True when Reserved/Occupied was manually set by an admin rather than derived from a booking. */
+  manual_status?: boolean;
   housekeeping_status?: PMSHousekeepingStatus;
   maintenance_reason?: string;
   block_start_date?: string;
