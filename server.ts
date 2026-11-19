@@ -196,10 +196,13 @@ async function startServer() {
 
       const check_in = String(raw.check_in || '');
       const check_out = String(raw.check_out || '');
-      const datePattern = /^\\d{4}-\\d{2}-\\d{2}$/;
-      if (!datePattern.test(check_in) || !datePattern.test(check_out) ||
-          !Number.isFinite(Date.parse(check_in + 'T00:00:00Z')) ||
-          !Number.isFinite(Date.parse(check_out + 'T00:00:00Z')) || check_out <= check_in) {
+      const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+      const isRealDate = (value: string) => {
+        if (!datePattern.test(value)) return false;
+        const parsed = new Date(value + 'T00:00:00.000Z');
+        return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+      };
+      if (!isRealDate(check_in) || !isRealDate(check_out) || check_out <= check_in) {
         return res.status(400).json({ error: 'Valid check-in and check-out dates are required.' });
       }
 
